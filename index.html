@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Toner's System</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- Bibliotecas para geração de PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <!-- Chart.js para gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+      .nav-bar {
+        background: #2d3748;
+        color: white;
+        padding: 0.75rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .nav-links {
+        display: flex;
+        gap: 1rem;
+      }
+      .nav-item {
+        color: #cbd5e0;
+        text-decoration: none;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        font-weight: 500;
+      }
+      .nav-item:hover, .nav-item.active {
+        background: #4a5568;
+        color: white;
+      }
+      .user-info-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .user-badge {
+        display: inline-block;
+        padding: 0.25rem 0.6rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: bold;
+        text-transform: uppercase;
+      }
+      .role-super_admin { background: #e53e3e; color: white; }
+      .role-admin { background: #3182ce; color: white; }
+      .role-usuario { background: #38a169; color: white; }
+    </style>
+    <script src="auth.js"></script>
+    <script>Auth.requireAuth(['ADMIN', 'SUPER_ADMIN']);</script>
+  </head>
+  <body>
+    <!-- Cabeçalho de Navegação -->
+    <header class="nav-bar">
+      <div class="nav-links" id="mainNavigation">
+        <!-- Inserido dinamicamente via auth.js -->
+      </div>
+      <div class="user-info-bar" id="userDisplayInfo">
+        <!-- Inserido dinamicamente via auth.js -->
+      </div>
+    </header>
+
+    <div class="container" style="margin-top: 1.5rem;">
+      <!-- Cabeçalho -->
+      <header class="header">
+        <div class="guaraci-header-container">
+          <img src="logo_guaraci.png" alt="Prefeitura Municipal de Guaraci - SP" class="guaraci-logo-header" />
+          <div class="guaraci-header-text">
+            <h1>Prefeitura Municipal de Guaraci - SP</h1>
+            <p>Sistema de Controle de Toners - Departamento de TI</p>
+          </div>
+        </div>
+      </header>
+
+      <!-- Dashboard de Gráficos -->
+      <section class="dashboard-section">
+        <h2 class="dashboard-title">📊 Visão Geral do Estoque</h2>
+        
+        <div class="dashboard-grid">
+          <!-- Gráfico de Pizza - Distribuição por Marca -->
+          <div class="chart-card">
+            <h3>Distribuição por Marca</h3>
+            <canvas id="brandPieChart"></canvas>
+          </div>
+
+          <!-- Gráfico Donut - Saúde Geral -->
+          <div class="chart-card">
+            <h3>Saúde do Estoque</h3>
+            <canvas id="healthDonutChart"></canvas>
+          </div>
+
+          <!-- Widget - Precisam Pedido -->
+          <div class="chart-card widget-card">
+            <h3>� Precisam Pedido</h3>
+            <div id="topCriticalWidget"></div>
+          </div>
+        </div>
+
+        <!-- Linha de Insights -->
+        <div class="insights-bar">
+          <div class="insight-item" id="insightPedidos">
+            <span class="insight-icon">📦</span>
+            <div class="insight-text">
+              <strong id="insightPedidosCount">0</strong>
+              <small>Itens precisam pedido</small>
+            </div>
+          </div>
+
+          <div class="insight-item" id="insightMarcas">
+            <span class="insight-icon">🏭</span>
+            <div class="insight-text">
+              <strong id="insightMarcasCount">0</strong>
+              <small>Marcas diferentes</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Controles -->
+      <div class="controls">
+        <div class="controls-row">
+          <input
+            type="text"
+            id="searchInput"
+            class="search-box"
+            placeholder="Buscar por marca, modelo ou toner..."
+          />
+          <select id="marcaFilter" class="filter-select">
+            <option value="">Todas as marcas</option>
+          </select>
+          <select id="statusFilter" class="filter-select">
+            <option value="">Todos os status</option>
+            <option value="sim">Precisa pedido</option>
+            <option value="nao">Não precisa pedido</option>
+          </select>
+          <button id="clearFiltersBtn" class="btn btn-warning btn-small">
+            🔄 Limpar Filtros
+          </button>
+        </div>
+        <div class="controls-row">
+          <button id="addBtn" class="btn btn-primary">
+            ➕ Adicionar Toner
+          </button>
+          <button id="exportBtn" class="btn btn-success">
+            📤 Exportar Dados
+          </button>
+          <button id="exportFilteredBtn" class="btn btn-info">
+            📤 Exportar Filtrados
+          </button>
+          <button id="pdfReportBtn" class="btn btn-pdf" title="Gerar relatório de pedidos em PDF">
+            📄 Relatório PDF
+          </button>
+          <button id="importBtn" class="btn btn-warning">
+            📥 Importar Dados
+          </button>
+          <input
+            type="file"
+            id="importFile"
+            accept=".json"
+            style="display: none"
+          />
+        </div>
+      </div>
+
+      <!-- Tabela -->
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th onclick="sortBy('marca')">Marca ▼</th>
+              <th onclick="sortBy('modelo')">Modelo ▼</th>
+              <th onclick="sortBy('toner')">Toner ▼</th>
+              <th onclick="sortBy('quantidade')">Quantidade ▼</th>
+              <th onclick="sortBy('realizarPedido')">Realizar Pedido ▼</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <!-- Dados serão inseridos aqui via JavaScript -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="modalTitle">Adicionar Toner</h2>
+          <span id="closeModal" class="close">&times;</span>
+        </div>
+
+        <form id="itemForm">
+          <div class="form-group">
+            <label for="marca">Marca *</label>
+            <input
+              type="text"
+              id="marca"
+              name="marca"
+              class="form-control"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="modelo">Modelo *</label>
+            <input
+              type="text"
+              id="modelo"
+              name="modelo"
+              class="form-control"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="toner">Toner *</label>
+            <input
+              type="text"
+              id="toner"
+              name="toner"
+              class="form-control"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="quantidade">Quantidade</label>
+            <input
+              type="number"
+              id="quantidade"
+              name="quantidade"
+              class="form-control"
+              min="0"
+              value="0"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="estoqueMinimo">Estoque Mínimo</label>
+            <input
+              type="number"
+              id="estoqueMinimo"
+              name="estoqueMinimo"
+              class="form-control"
+              min="1"
+              value="5"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>
+              <input
+                type="checkbox"
+                id="realizarPedido"
+                name="realizarPedido"
+              />
+              Realizar Pedido
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" id="cancelBtn" class="btn btn-danger">
+              Cancelar
+            </button>
+            <button type="button" id="saveBtn" class="btn btn-success">
+              Salvar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Scripts -->
+    <div id="ticketModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>🎫 Criar Chamado de Toner</h2>
+          <span id="closeTicketModal" class="close">&times;</span>
+        </div>
+
+        <div class="toner-info" id="tonerInfo">
+          <!-- Informações do toner serão inseridas aqui -->
+        </div>
+
+        <form id="ticketForm">
+          <div class="form-group">
+            <label for="ticketTitle">Título *</label>
+            <input
+              type="text"
+              id="ticketTitle"
+              name="ticketTitle"
+              class="form-control"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="ticketDescription">Descrição *</label>
+            <textarea
+              id="ticketDescription"
+              name="ticketDescription"
+              class="form-control"
+              rows="4"
+              required
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="ticketPriority">Prioridade</label>
+            <select id="ticketPriority" name="ticketPriority" class="form-control">
+              <option value="normal">Normal</option>
+              <option value="high">Alta</option>
+              <option value="urgent">Urgente</option>
+            </select>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" id="cancelTicketBtn" class="btn btn-danger">
+              Cancelar
+            </button>
+            <button type="button" id="createTicketBtn" class="btn btn-success">
+              Criar Chamado
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="data.js"></script>
+    <script src="api.js"></script>
+    <script src="pdf-generator.js"></script>
+    <script src="dashboard.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>

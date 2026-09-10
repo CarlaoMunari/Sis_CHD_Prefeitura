@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Prefeitura Municipal de Guaraci-SP</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      background: linear-gradient(135deg, #002B7F 0%, #001F5C 50%, #00875A 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .login-card {
+      background: #ffffff;
+      width: 100%;
+      max-width: 480px;
+      padding: 2.5rem;
+      border-radius: 16px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+      border-top: 5px solid #00875A;
+    }
+    .login-header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    .guaraci-logo-login {
+      max-width: 220px;
+      height: auto;
+      margin-bottom: 1rem;
+    }
+    .login-header h1 {
+      font-size: 1.3rem;
+      color: #002B7F;
+      margin: 0 0 0.25rem 0;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .login-header p {
+      color: #4a5568;
+      font-size: 0.95rem;
+      margin: 0;
+      font-weight: 600;
+    }
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      color: #2d3748;
+    }
+    .form-control {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 1px solid #cbd5e0;
+      border-radius: 8px;
+      font-size: 1rem;
+      box-sizing: border-box;
+      transition: border-color 0.2s;
+    }
+    .form-control:focus {
+      outline: none;
+      border-color: #00875A;
+      box-shadow: 0 0 0 3px rgba(0, 135, 90, 0.2);
+    }
+    .btn-login {
+      width: 100%;
+      padding: 0.85rem;
+      font-size: 1.05rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #002B7F 0%, #00875A 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.2s;
+    }
+    .btn-login:hover {
+      box-shadow: 0 5px 15px rgba(0, 43, 127, 0.4);
+    }
+    .alert-error {
+      background: #fed7d7;
+      border: 1px solid #feb2b2;
+      color: #c53030;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.25rem;
+      display: none;
+      font-size: 0.9rem;
+    }
+    .contact-info-box {
+      margin-top: 1.75rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid #e2e8f0;
+      text-align: center;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #2d3748;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-header">
+      <img src="logo_guaraci.png" alt="Prefeitura Municipal de Guaraci - SP" class="guaraci-logo-login" />
+      <h1>Prefeitura Municipal de Guaraci - SP</h1>
+      <p>Sistema de Chamados & Controle de Toners</p>
+    </div>
+
+    <div id="errorAlert" class="alert-error"></div>
+
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="username">Usuário ou E-mail</label>
+        <input type="text" id="username" class="form-control" placeholder="Digite seu usuário ou e-mail" required autocomplete="username" />
+      </div>
+
+      <div class="form-group">
+        <label for="password">Senha</label>
+        <input type="password" id="password" class="form-control" placeholder="••••••••" required autocomplete="current-password" />
+      </div>
+
+      <button type="submit" id="submitBtn" class="btn-login">Entrar no Sistema</button>
+    </form>
+
+    <div class="contact-info-box">
+      PARA CRIAR UM USUARIO ENTRE EM CONTATO COM O DEPARTAMENTO DE TECNOLOGIA - 17 3285-9997
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script>
+    // Se já estiver logado, redirecionar para a Central de Chamados
+    if (Auth.getUser()) {
+      window.location.href = 'chamados.html';
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const errorAlert = document.getElementById('errorAlert');
+      const submitBtn = document.getElementById('submitBtn');
+
+      errorAlert.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Autenticando...';
+
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Erro ao realizar login');
+        }
+
+        Auth.setUser(data.user, data.token);
+        window.location.href = 'chamados.html';
+      } catch (err) {
+        errorAlert.textContent = err.message;
+        errorAlert.style.display = 'block';
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Entrar no Sistema';
+      }
+    });
+  </script>
+</body>
+</html>

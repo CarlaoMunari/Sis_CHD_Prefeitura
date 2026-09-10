@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Central de Chamados - Sistema Helpdesk</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .nav-bar {
+      background: #2d3748;
+      color: white;
+      padding: 0.75rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .nav-links {
+      display: flex;
+      gap: 1rem;
+    }
+    .nav-item {
+      color: #cbd5e0;
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+    .nav-item:hover, .nav-item.active {
+      background: #4a5568;
+      color: white;
+    }
+    .user-info-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .user-badge {
+      display: inline-block;
+      padding: 0.25rem 0.6rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .role-super_admin { background: #e53e3e; color: white; }
+    .role-admin { background: #3182ce; color: white; }
+    .role-usuario { background: #38a169; color: white; }
+
+    /* Estilos específicos de chamados */
+    .status-badge {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+    .status-aberto { background: #feebc8; color: #c05621; }
+    .status-em_atendimento { background: #bee3f8; color: #2b6cb0; }
+    .status-aguardando_pecas { background: #e9d8fd; color: #6b46c1; }
+    .status-finalizado { background: #c6f6d5; color: #22543d; }
+    .status-cancelado { background: #fed7d7; color: #9b2c2c; }
+
+    .toner-selection-box {
+      background: #f7fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin-top: 1rem;
+    }
+    .toner-item-card {
+      background: white;
+      border: 1px solid #cbd5e0;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .stock-tag {
+      font-size: 0.85rem;
+      font-weight: bold;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .stock-available { background: #c6f6d5; color: #22543d; }
+    .stock-zero { background: #fed7d7; color: #9b2c2c; }
+    .stock-ink { background: #ebf8ff; color: #2b6cb0; }
+  </style>
+</head>
+<body>
+  <!-- Cabeçalho de Navegação -->
+  <header class="nav-bar">
+    <div class="nav-links" id="mainNavigation">
+      <!-- Inserido dinamicamente via auth.js -->
+    </div>
+    <div class="user-info-bar" id="userDisplayInfo">
+      <!-- Inserido dinamicamente via auth.js -->
+    </div>
+  </header>
+
+  <div class="container" style="margin-top: 2rem;">
+    <header class="header">
+      <div class="guaraci-header-container">
+        <img src="logo_guaraci.png" alt="Prefeitura Municipal de Guaraci - SP" class="guaraci-logo-header" />
+        <div class="guaraci-header-text">
+          <h1>Prefeitura Municipal de Guaraci - SP</h1>
+          <p>Central de Chamados - Departamento de TI</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Controles -->
+    <div class="controls">
+      <div class="controls-row">
+        <input type="text" id="ticketSearch" class="search-box" placeholder="Buscar por código, solicitante ou assunto..." />
+        <select id="categoriaFilter" class="filter-select">
+          <option value="">Todas as categorias</option>
+          <option value="Manutenção em Equipamentos">Manutenção em Equipamentos</option>
+          <option value="Instalação ou Revisão da Infraestrutura">Instalação ou Revisão da Infraestrutura</option>
+          <option value="Falta de Internet ou Rede Local">Falta de Internet ou Rede Local</option>
+          <option value="Solicitação de Toners e Tintas">Solicitação de Toners e Tintas</option>
+        </select>
+        <select id="ticketStatusFilter" class="filter-select">
+          <option value="">Todos os status</option>
+          <option value="ABERTO">Aberto</option>
+          <option value="EM_ATENDIMENTO">Em Atendimento</option>
+          <option value="AGUARDANDO_PECAS">Aguardando Peças</option>
+          <option value="FINALIZADO">Finalizado</option>
+          <option value="CANCELADO">Cancelado</option>
+        </select>
+      </div>
+      <div class="controls-row">
+        <button id="openTicketBtn" class="btn btn-primary">➕ Abrir Novo Chamado</button>
+      </div>
+    </div>
+
+    <!-- Tabela de Chamados -->
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Data</th>
+            <th>Solicitante</th>
+            <th>Categoria</th>
+            <th>Detalhes / Impressora</th>
+            <th>Status</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="ticketsTableBody">
+          <!-- Inserido via JavaScript -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Modal de Abertura de Chamado -->
+  <div id="ticketModal" class="modal">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h2 id="ticketModalTitle">Abrir Novo Chamado</h2>
+        <span id="closeTicketModal" class="close">&times;</span>
+      </div>
+
+      <form id="ticketForm">
+        <div class="form-group">
+          <label for="categoria">Categoria do Chamado *</label>
+          <select id="categoria" name="categoria" class="form-control" required>
+            <option value="">Selecione uma categoria...</option>
+            <option value="Manutenção em Equipamentos">🔧 Manutenção em Equipamentos</option>
+            <option value="Instalação ou Revisão da Infraestrutura">🏗️ Instalação ou Revisão da Infraestrutura</option>
+            <option value="Falta de Internet ou Rede Local">🌐 Falta de Internet ou Rede Local</option>
+            <option value="Solicitação de Toners e Tintas">🖨️ Solicitação de Toners e Tintas</option>
+          </select>
+        </div>
+
+        <!-- Seção Dinâmica para Solicitação de Toner -->
+        <div id="tonerRequestSection" class="toner-selection-box" style="display: none;">
+          <h3 style="margin-top:0; font-size: 1.1rem; color: #2d3748;">🖨️ Dados da Impressora & Suprimento</h3>
+          
+          <div class="form-group">
+            <label for="modeloImpressora">Selecione o Modelo da Impressora *</label>
+            <select id="modeloImpressora" class="form-control">
+              <option value="">Carregando modelos de impressoras...</option>
+            </select>
+          </div>
+
+          <div id="tonerItemsContainer" style="display: none;">
+            <label style="font-weight: 600; color: #4a5568; margin-bottom: 6px; display: block;">
+              Selecione o(s) Toner(s) / Tinta(s) e a quantidade desejada:
+            </label>
+            <div id="tonerItemsList">
+              <!-- Renderizado dinamicamente -->
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 1rem;">
+          <label for="descricao">Descrição / Observações *</label>
+          <textarea id="descricao" name="descricao" class="form-control" rows="4" placeholder="Descreva os detalhes da sua solicitação..." required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="prioridade">Prioridade</label>
+          <select id="prioridade" name="prioridade" class="form-control">
+            <option value="NORMAL">Normal</option>
+            <option value="ALTA">Alta</option>
+            <option value="URGENTE">Urgente</option>
+          </select>
+        </div>
+
+        <div class="form-actions" style="margin-top: 1.5rem;">
+          <button type="button" id="cancelTicketModalBtn" class="btn btn-danger">Cancelar</button>
+          <button type="submit" class="btn btn-success">Enviar Chamado</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de Atendimento e Detalhes do Chamado (Admin / Usuário) -->
+  <div id="ticketDetailModal" class="modal">
+    <div class="modal-content" style="max-width: 650px;">
+      <div class="modal-header">
+        <h2 id="detailModalTitle">Detalhes do Chamado</h2>
+        <span id="closeDetailModal" class="close">&times;</span>
+      </div>
+
+      <div id="detailModalContent" style="padding: 10px 0;">
+        <!-- Preenchido via JavaScript -->
+      </div>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script src="tickets.js"></script>
+</body>
+</html>

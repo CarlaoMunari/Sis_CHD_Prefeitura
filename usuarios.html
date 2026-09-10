@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerenciamento de Usuários - Sistema de Chamados</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .nav-bar {
+      background: #2d3748;
+      color: white;
+      padding: 0.75rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .nav-links {
+      display: flex;
+      gap: 1rem;
+    }
+    .nav-item {
+      color: #cbd5e0;
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 500;
+    }
+    .nav-item:hover, .nav-item.active {
+      background: #4a5568;
+      color: white;
+    }
+    .user-info-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .user-badge {
+      display: inline-block;
+      padding: 0.25rem 0.6rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .role-super_admin { background: #e53e3e; color: white; }
+    .role-admin { background: #3182ce; color: white; }
+    .role-usuario { background: #38a169; color: white; }
+    .dept-badge {
+      background: #edf2f7;
+      color: #2d3748;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <!-- Cabeçalho de Navegação -->
+  <header class="nav-bar">
+    <div class="nav-links" id="mainNavigation">
+      <!-- Inserido dinamicamente via auth.js -->
+    </div>
+    <div class="user-info-bar" id="userDisplayInfo">
+      <!-- Inserido dinamicamente via auth.js -->
+    </div>
+  </header>
+
+  <div class="container" style="margin-top: 2rem;">
+    <header class="header">
+      <div class="guaraci-header-container">
+        <img src="logo_guaraci.png" alt="Prefeitura Municipal de Guaraci - SP" class="guaraci-logo-header" />
+        <div class="guaraci-header-text">
+          <h1>Prefeitura Municipal de Guaraci - SP</h1>
+          <p>Gestão de Usuários & Acessos - Departamento de TI</p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Controles -->
+    <div class="controls" style="margin-bottom: 1.5rem;">
+      <div class="controls-row">
+        <button id="addUserBtn" class="btn btn-primary">➕ Adicionar Novo Usuário</button>
+      </div>
+    </div>
+
+    <!-- Tabela de Usuários -->
+    <div class="table-container">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Usuário / Login</th>
+            <th>Nome Completo</th>
+            <th>E-mail</th>
+            <th>Departamento</th>
+            <th>Perfil / Função</th>
+            <th>Criado Por</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="usersTableBody">
+          <!-- Inserido via JavaScript -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Modal de Cadastro / Edição de Usuário -->
+  <div id="userModal" class="modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h2 id="modalTitle">Cadastrar Novo Usuário</h2>
+        <span id="closeUserModal" class="close">&times;</span>
+      </div>
+
+      <form id="userForm">
+        <input type="hidden" id="editUserId" />
+
+        <div class="form-group">
+          <label for="login">Login / Nome de Usuário *</label>
+          <input type="text" id="login" name="login" class="form-control" placeholder="ex: CarlosMunari" required />
+        </div>
+
+        <div class="form-group">
+          <label for="nome">Nome Completo *</label>
+          <input type="text" id="nome" name="nome" class="form-control" placeholder="ex: Carlos Munari" required />
+        </div>
+
+        <div class="form-group">
+          <label for="email">E-mail *</label>
+          <input type="email" id="email" name="email" class="form-control" placeholder="carlos@empresa.com" required />
+        </div>
+
+        <div class="form-group">
+          <label for="role">Perfil de Acesso *</label>
+          <select id="role" name="role" class="form-control" required onchange="handleRoleDeptChange(this.value)">
+            <!-- Preenchido conforme as permissões do usuário logado -->
+          </select>
+          <small id="roleHelp" style="color: #718096; display: block; margin-top: 4px;"></small>
+        </div>
+
+        <div class="form-group">
+          <label for="departamento">Departamento / Setor *</label>
+          <input type="text" id="departamento" name="departamento" class="form-control" placeholder="ex: FINANCEIRO, RH, TECNOLOGIA" required />
+          <small id="deptHelp" style="color: #718096; display: block; margin-top: 4px;">Administradores pertencem automaticamente ao setor TECNOLOGIA.</small>
+        </div>
+
+        <div class="form-group" id="passwordGroup">
+          <label for="password">Senha *</label>
+          <input type="password" id="password" name="password" class="form-control" minlength="4" />
+          <small id="passHelp" style="color: #718096; display: none;">Deixe em branco se não desejar alterar a senha do usuário.</small>
+        </div>
+
+        <div class="form-actions" style="margin-top: 1.5rem;">
+          <button type="button" id="cancelUserBtn" class="btn btn-danger">Cancelar</button>
+          <button type="submit" class="btn btn-success">Salvar Usuário</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de Redefinição de Senha por Admin -->
+  <div id="adminResetPasswordModal" class="modal">
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <h2>🔑 Redefinir Senha de Usuário</h2>
+        <span id="closeAdminResetModal" class="close">&times;</span>
+      </div>
+
+      <form id="adminResetPasswordForm">
+        <input type="hidden" id="resetUserId" />
+        <p style="margin-bottom: 1rem;">Alterando senha do usuário: <strong id="resetUserLoginDisplay"></strong></p>
+
+        <div class="form-group">
+          <label for="adminNewPassword">Nova Senha *</label>
+          <input type="password" id="adminNewPassword" class="form-control" placeholder="Digite a nova senha" required minlength="4" />
+        </div>
+
+        <div class="form-actions" style="margin-top: 1.5rem;">
+          <button type="button" id="cancelAdminResetBtn" class="btn btn-danger">Cancelar</button>
+          <button type="submit" class="btn btn-success">Atualizar Senha</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script>
+    Auth.requireAuth(['ADMIN', 'SUPER_ADMIN']);
+
+    let usersList = [];
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadUsers();
+      setupUserModal();
+      setupAdminResetModal();
+    });
+
+    async function loadUsers() {
+      try {
+        const response = await fetch('/api/users', {
+          headers: { 'Authorization': `Bearer ${Auth.getToken()}` }
+        });
+        if (!response.ok) throw new Error('Erro ao carregar usuários');
+        usersList = await response.json();
+        renderUsersTable();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function renderUsersTable() {
+      const tbody = document.getElementById('usersTableBody');
+      tbody.innerHTML = '';
+
+      if (usersList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center">Nenhum usuário cadastrado.</td></tr>`;
+        return;
+      }
+
+      usersList.forEach(u => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>#${u.id}</td>
+          <td><code>${u.login || u.email}</code></td>
+          <td><strong>${u.nome}</strong></td>
+          <td>${u.email}</td>
+          <td><span class="dept-badge">${u.departamento || 'TECNOLOGIA'}</span></td>
+          <td><span class="user-badge role-${u.role.toLowerCase()}">${u.role}</span></td>
+          <td>${u.criadoPor || 'SISTEMA'}</td>
+          <td>
+            <button class="btn btn-primary btn-small" onclick="openEditUserModal(${u.id})">✏️ Editar</button>
+            <button class="btn btn-warning btn-small" onclick="openAdminResetPassword(${u.id}, '${u.login || u.nome}')" style="margin-left:2px;">🔑 Senha</button>
+            ${u.role !== 'SUPER_ADMIN' ? `<button class="btn btn-danger btn-small" onclick="deleteUser(${u.id})" style="margin-left:2px;">Excluir</button>` : ''}
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    function handleRoleDeptChange(selectedRole) {
+      const deptInput = document.getElementById('departamento');
+      if (selectedRole === 'ADMIN' || selectedRole === 'SUPER_ADMIN') {
+        deptInput.value = 'TECNOLOGIA';
+        deptInput.readOnly = true;
+      } else {
+        deptInput.readOnly = false;
+        if (deptInput.value === 'TECNOLOGIA') {
+          deptInput.value = '';
+        }
+      }
+    }
+
+    function setupUserModal() {
+      const currentUser = Auth.getUser();
+      const modal = document.getElementById('userModal');
+      const roleSelect = document.getElementById('role');
+      const roleHelp = document.getElementById('roleHelp');
+
+      document.getElementById('addUserBtn').addEventListener('click', () => {
+        document.getElementById('userForm').reset();
+        document.getElementById('editUserId').value = '';
+        document.getElementById('modalTitle').textContent = 'Cadastrar Novo Usuário';
+        document.getElementById('password').required = true;
+        document.getElementById('passHelp').style.display = 'none';
+
+        roleSelect.innerHTML = '';
+        if (currentUser.role === 'SUPER_ADMIN') {
+          roleSelect.innerHTML = `
+            <option value="USUARIO">Usuário Solicitante</option>
+            <option value="ADMIN">Administrador</option>
+          `;
+          roleHelp.textContent = 'Como SUPER_ADMIN, você pode criar Administradores e Usuários.';
+        } else {
+          roleSelect.innerHTML = `
+            <option value="USUARIO">Usuário Solicitante</option>
+          `;
+          roleHelp.textContent = 'Como ADMIN, você pode criar apenas contas de Usuários Solicitantes.';
+        }
+
+        handleRoleDeptChange(roleSelect.value);
+        modal.style.display = 'block';
+      });
+
+      document.getElementById('closeUserModal').addEventListener('click', () => modal.style.display = 'none');
+      document.getElementById('cancelUserBtn').addEventListener('click', () => modal.style.display = 'none');
+
+      document.getElementById('userForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const editId = document.getElementById('editUserId').value;
+        const login = document.getElementById('login').value.trim();
+        const nome = document.getElementById('nome').value.trim();
+        const email = document.getElementById('email').value.trim();
+        const departamento = document.getElementById('departamento').value.trim();
+        const password = document.getElementById('password').value;
+        const role = document.getElementById('role').value;
+
+        try {
+          if (editId) {
+            // Edição
+            const response = await fetch(`/api/users/${editId}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Auth.getToken()}`
+              },
+              body: JSON.stringify({ login, nome, email, departamento, role })
+            });
+
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Erro ao editar usuário');
+
+            alert('Dados do usuário atualizados com sucesso!');
+          } else {
+            // Criação
+            const response = await fetch('/api/users', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${Auth.getToken()}`
+              },
+              body: JSON.stringify({ login, nome, email, departamento, password, role, criadoPor: currentUser.login || currentUser.email })
+            });
+
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Erro ao cadastrar usuário');
+
+            alert('Usuário cadastrado com sucesso!');
+          }
+
+          modal.style.display = 'none';
+          loadUsers();
+        } catch (err) {
+          alert('Erro: ' + err.message);
+        }
+      });
+    }
+
+    function openEditUserModal(userId) {
+      const u = usersList.find(user => user.id === userId);
+      if (!u) return;
+
+      const currentUser = Auth.getUser();
+      const modal = document.getElementById('userModal');
+      const roleSelect = document.getElementById('role');
+      const roleHelp = document.getElementById('roleHelp');
+
+      document.getElementById('editUserId').value = u.id;
+      document.getElementById('modalTitle').textContent = `Editar Usuário: ${u.login || u.nome}`;
+      document.getElementById('login').value = u.login || '';
+      document.getElementById('nome').value = u.nome || '';
+      document.getElementById('email').value = u.email || '';
+      document.getElementById('departamento').value = u.departamento || 'TECNOLOGIA';
+      document.getElementById('password').required = false;
+      document.getElementById('passHelp').style.display = 'block';
+
+      roleSelect.innerHTML = '';
+      if (currentUser.role === 'SUPER_ADMIN') {
+        roleSelect.innerHTML = `
+          <option value="USUARIO" ${u.role === 'USUARIO' ? 'selected' : ''}>Usuário Solicitante</option>
+          <option value="ADMIN" ${u.role === 'ADMIN' ? 'selected' : ''}>Administrador</option>
+          <option value="SUPER_ADMIN" ${u.role === 'SUPER_ADMIN' ? 'selected' : ''}>Super Administrador</option>
+        `;
+      } else {
+        roleSelect.innerHTML = `
+          <option value="USUARIO" ${u.role === 'USUARIO' ? 'selected' : ''}>Usuário Solicitante</option>
+        `;
+      }
+
+      handleRoleDeptChange(roleSelect.value);
+      modal.style.display = 'block';
+    }
+
+    function setupAdminResetModal() {
+      const modal = document.getElementById('adminResetPasswordModal');
+      document.getElementById('closeAdminResetModal').addEventListener('click', () => modal.style.display = 'none');
+      document.getElementById('cancelAdminResetBtn').addEventListener('click', () => modal.style.display = 'none');
+
+      document.getElementById('adminResetPasswordForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const userId = document.getElementById('resetUserId').value;
+        const newPassword = document.getElementById('adminNewPassword').value;
+
+        try {
+          const response = await fetch(`/api/users/${userId}/change-password`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Auth.getToken()}`
+            },
+            body: JSON.stringify({ newPassword, isAdminReset: true })
+          });
+
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Erro ao redefinir senha');
+
+          alert(data.message || 'Senha alterada com sucesso!');
+          modal.style.display = 'none';
+        } catch (err) {
+          alert('Erro: ' + err.message);
+        }
+      });
+    }
+
+    function openAdminResetPassword(userId, loginName) {
+      document.getElementById('resetUserId').value = userId;
+      document.getElementById('resetUserLoginDisplay').textContent = loginName;
+      document.getElementById('adminNewPassword').value = '';
+      document.getElementById('adminResetPasswordModal').style.display = 'block';
+    }
+
+    async function deleteUser(id) {
+      if (confirm('Tem certeza que deseja excluir este usuário?')) {
+        try {
+          const response = await fetch(`/api/users/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${Auth.getToken()}` }
+          });
+          if (!response.ok) throw new Error('Erro ao excluir usuário');
+          loadUsers();
+        } catch (err) {
+          alert(err.message);
+        }
+      }
+    }
+  </script>
+</body>
+</html>
