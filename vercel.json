@@ -5,18 +5,21 @@
       "src": "server.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["logo_guaraci.png", "database/**", "toners_backup_49.json", "*.html", "*.css", "*.js"]
+        "includeFiles": [
+          "logo_guaraci.png",
+          "database/**",
+          "toners_backup_49.json",
+          "*.html",
+          "*.css",
+          "*.js"
+        ]
       }
     }
   ],
-  "rewrites": [
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "destination": "/server.js"
-    },
-    {
-      "source": "/",
-      "destination": "/login.html"
+      "src": "/(.*)",
+      "dest": "server.js"
     }
   ]
 }
