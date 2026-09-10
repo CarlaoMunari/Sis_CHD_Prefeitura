@@ -579,10 +579,14 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`==================================================`);
-  console.log(`🚀 Sistema de Chamados & Controle de Toners Rodando!`);
-  console.log(`🌐 URL Local: http://localhost:${PORT}`);
-  console.log(`🔐 Tela de Login: http://localhost:${PORT}/login.html`);
-  console.log(`==================================================`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`==================================================`);
+    console.log(`🚀 Sistema de Chamados & Controle de Toners Rodando!`);
+    console.log(`🌐 URL Local: http://localhost:${PORT}`);
+    console.log(`🔐 Tela de Login: http://localhost:${PORT}/login.html`);
+    console.log(`==================================================`);
+  });
+}
+
+module.exports = server;
