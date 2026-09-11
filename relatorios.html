@@ -1,0 +1,177 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relatorios - Sistema Helpdesk</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    .nav-bar{background:#2d3748;color:white;padding:.75rem 2rem;display:flex;justify-content:space-between;align-items:center}
+    .nav-links{display:flex;gap:1rem}
+    .nav-item{color:#cbd5e0;text-decoration:none;padding:.5rem 1rem;border-radius:6px;font-weight:500}
+    .nav-item:hover,.nav-item.active{background:#4a5568;color:white}
+    .user-info-bar{display:flex;align-items:center;gap:.5rem}
+    .user-badge{display:inline-block;padding:.25rem .6rem;border-radius:12px;font-size:.75rem;font-weight:bold;text-transform:uppercase}
+    .role-super_admin{background:#e53e3e;color:white}
+    .role-admin{background:#3182ce;color:white}
+    .role-usuario{background:#38a169;color:white}
+    .reports-page-title{font-size:1.6rem;font-weight:700;color:#2d3748;margin-bottom:.25rem}
+    .reports-page-subtitle{color:#718096;font-size:.95rem;margin-bottom:2rem}
+    .reports-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1.5rem;margin-bottom:2rem}
+    .report-card{background:white;border-radius:12px;border:1px solid #e2e8f0;padding:1.75rem;box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;flex-direction:column;gap:.75rem;transition:box-shadow .2s,transform .2s}
+    .report-card:hover{box-shadow:0 6px 20px rgba(0,0,0,.12);transform:translateY(-2px)}
+    .report-card-icon{font-size:2.5rem;line-height:1}
+    .report-card-title{font-size:1.1rem;font-weight:700;color:#2d3748}
+    .report-card-desc{font-size:.88rem;color:#718096;flex:1}
+    .report-card-footer{display:flex;justify-content:space-between;align-items:center;margin-top:.5rem;gap:.5rem}
+    .date-filter-row{display:flex;gap:.5rem;flex-wrap:wrap}
+    .date-filter-row label{font-size:.78rem;color:#4a5568;display:flex;flex-direction:column;gap:2px}
+    .date-filter-row input[type=date]{border:1px solid #cbd5e0;border-radius:5px;padding:4px 7px;font-size:.82rem;color:#2d3748}
+    .stat-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:.82rem;font-weight:600}
+    .stat-aberto{background:#feebc8;color:#c05621}
+    .stat-finalizado{background:#c6f6d5;color:#22543d}
+    .stat-categoria{background:#e9d8fd;color:#6b46c1}
+    .stat-depto{background:#bee3f8;color:#2b6cb0}
+    .preview-section{background:white;border-radius:12px;border:1px solid #e2e8f0;padding:1.5rem;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:2rem;display:none}
+    .preview-section.visible{display:block}
+    .preview-title{font-size:1rem;font-weight:700;color:#2d3748;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+    .preview-charts{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+    @media(max-width:640px){.preview-charts{grid-template-columns:1fr}}
+    .chart-preview-box{background:#f7fafc;border-radius:8px;padding:1rem}
+    .chart-preview-box h4{font-size:.88rem;color:#4a5568;margin-bottom:.5rem}
+    .report-loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:1rem}
+    .report-loading-overlay.active{display:flex}
+    .spinner-ring{width:60px;height:60px;border:5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spinRing .9s linear infinite}
+    @keyframes spinRing{to{transform:rotate(360deg)}}
+    .spinner-label{color:white;font-weight:600;font-size:1rem}
+    .feedback-bar{padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-weight:600;display:none}
+    .feedback-bar.success{background:#c6f6d5;color:#22543d;display:block}
+    .feedback-bar.error{background:#fed7d7;color:#9b2c2c;display:block}
+    .btn-purple{background:linear-gradient(135deg,#805ad5,#6b46c1);color:white}
+    .btn-purple:hover{background:linear-gradient(135deg,#6b46c1,#805ad5);transform:translateY(-2px);box-shadow:0 5px 15px rgba(128,90,213,.4)}
+  </style>
+</head>
+<body>
+  <header class="nav-bar">
+    <div class="nav-links" id="mainNavigation"></div>
+    <div class="user-info-bar" id="userDisplayInfo"></div>
+  </header>
+
+  <div class="container" style="margin-top:2rem">
+    <header class="header">
+      <div class="guaraci-header-container">
+        <img src="logo_guaraci.png" alt="Prefeitura Municipal de Guaraci - SP" class="guaraci-logo-header" />
+        <div class="guaraci-header-text">
+          <h1>Prefeitura Municipal de Guaraci - SP</h1>
+          <p>Area de Relatorios - Departamento de TI</p>
+        </div>
+      </div>
+    </header>
+
+    <div id="feedbackBar" class="feedback-bar"></div>
+
+    <p class="reports-page-title">&#128202; Relatorios de Chamados</p>
+    <p class="reports-page-subtitle">Gere relatorios em PDF com os dados atualizados do sistema de chamados.</p>
+
+    <div class="reports-grid">
+
+      <!-- Chamados Abertos -->
+      <div class="report-card">
+        <div class="report-card-icon">&#128194;</div>
+        <div class="report-card-title">Chamados Abertos</div>
+        <div class="report-card-desc">Lista todos os chamados com status <strong>Aberto</strong>, <strong>Em Atendimento</strong> ou <strong>Aguardando Pecas</strong>, ordenados pela data de abertura.</div>
+        <div class="date-filter-row">
+          <label>De: <input type="date" id="dataInicioAbertos"></label>
+          <label>Ate: <input type="date" id="dataFimAbertos"></label>
+        </div>
+        <div class="report-card-footer">
+          <span class="stat-badge stat-aberto" id="countAbertos">&#9203; — chamados</span>
+          <button class="btn btn-pdf" onclick="gerarRelatorioAbertos()">&#128196; Gerar PDF</button>
+        </div>
+      </div>
+
+      <!-- Chamados Finalizados -->
+      <div class="report-card">
+        <div class="report-card-icon">&#9989;</div>
+        <div class="report-card-title">Chamados Finalizados</div>
+        <div class="report-card-desc">Lista todos os chamados com status <strong>Finalizado</strong> ou <strong>Cancelado</strong>, com data de conclusao e tempo de atendimento.</div>
+        <div class="date-filter-row">
+          <label>De: <input type="date" id="dataInicioFinalizados"></label>
+          <label>Ate: <input type="date" id="dataFimFinalizados"></label>
+        </div>
+        <div class="report-card-footer">
+          <span class="stat-badge stat-finalizado" id="countFinalizados">&#9989; — chamados</span>
+          <button class="btn btn-success" onclick="gerarRelatorioFinalizados()">&#128196; Gerar PDF</button>
+        </div>
+      </div>
+
+      <!-- Chamados por Categoria -->
+      <div class="report-card">
+        <div class="report-card-icon">&#127991;</div>
+        <div class="report-card-title">Chamados por Categoria</div>
+        <div class="report-card-desc">Agrupa todos os chamados por categoria, com totalizadores e percentuais de distribuicao.</div>
+        <div class="date-filter-row">
+          <label>De: <input type="date" id="dataInicioCategoria"></label>
+          <label>Ate: <input type="date" id="dataFimCategoria"></label>
+        </div>
+        <div class="report-card-footer">
+          <span class="stat-badge stat-categoria" id="countCategorias">&#127991; — categorias</span>
+          <button class="btn btn-purple" onclick="gerarRelatorioCategoria()">&#128196; Gerar PDF</button>
+        </div>
+      </div>
+
+      <!-- Chamados por Departamento -->
+      <div class="report-card">
+        <div class="report-card-icon">&#127970;</div>
+        <div class="report-card-title">Chamados por Departamento</div>
+        <div class="report-card-desc">Agrupa os chamados pelo departamento do solicitante, com totalizadores e detalhamento por status em cada setor.</div>
+        <div class="date-filter-row">
+          <label>De: <input type="date" id="dataInicioDepto"></label>
+          <label>Ate: <input type="date" id="dataFimDepto"></label>
+        </div>
+        <div class="report-card-footer">
+          <span class="stat-badge stat-depto" id="countDeptos">&#127970; — departamentos</span>
+          <button class="btn btn-info" onclick="gerarRelatorioDepto()">&#128196; Gerar PDF</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Previa de Graficos -->
+    <div class="preview-section" id="previewSection">
+      <div class="preview-title">&#128200; Previa dos Dados (Todos os Chamados)</div>
+      <div class="preview-charts">
+        <div class="chart-preview-box">
+          <h4>Distribuicao por Status</h4>
+          <canvas id="previewStatusChart" height="220"></canvas>
+        </div>
+        <div class="chart-preview-box">
+          <h4>Chamados por Categoria</h4>
+          <canvas id="previewCatChart" height="220"></canvas>
+        </div>
+        <div class="chart-preview-box">
+          <h4>Chamados por Departamento</h4>
+          <canvas id="previewDeptoChart" height="220"></canvas>
+        </div>
+        <div class="chart-preview-box">
+          <h4>Abertos vs Finalizados (Ultimos 30 dias)</h4>
+          <canvas id="previewTimelineChart" height="220"></canvas>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Loading Overlay -->
+  <div class="report-loading-overlay" id="loadingOverlay">
+    <div class="spinner-ring"></div>
+    <div class="spinner-label">Gerando PDF, aguarde...</div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script src="relatorios.js"></script>
+</body>
+</html>

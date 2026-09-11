@@ -77,6 +77,7 @@ const Auth = {
         navHtml += `
           <a href="index.html" class="nav-item ${window.location.pathname.includes('index.html') ? 'active' : ''}">🖨️ Controle de Toners</a>
           <a href="usuarios.html" class="nav-item ${window.location.pathname.includes('usuarios.html') ? 'active' : ''}">👥 Gerenciar Usuários</a>
+          <a href="relatorios.html" class="nav-item ${window.location.pathname.includes('relatorios.html') ? 'active' : ''}">📊 Relatórios</a>
         `;
       }
 
