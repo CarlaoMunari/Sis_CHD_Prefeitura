@@ -100,6 +100,57 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ============================================
+  // API DE REGISTRO PÚBLICO: /api/register
+  // ============================================
+  if (pathname === '/api/register' && method === 'POST') {
+    try {
+      const body = await getRequestBody(req);
+      const { login, nome, email, departamento, password } = body;
+
+      if (!nome || !email || !password || !login) {
+        return sendJSON(res, 400, { error: 'Todos os campos obrigatórios devem ser preenchidos.' });
+      }
+
+      if (password.length < 4) {
+        return sendJSON(res, 400, { error: 'A senha deve ter pelo menos 4 caracteres.' });
+      }
+
+      const users = loadJSON(USERS_FILE);
+      const userLogin = login.trim();
+
+      // Validar duplicatas (incluindo pendentes)
+      if (users.some(u =>
+        u.email.toLowerCase() === email.toLowerCase().trim() ||
+        (u.login && u.login.toLowerCase() === userLogin.toLowerCase())
+      )) {
+        return sendJSON(res, 400, { error: 'Este e-mail ou nome de usuário já está cadastrado ou com cadastro pendente.' });
+      }
+
+      const maxId = users.reduce((max, u) => (u.id > max ? u.id : max), 0);
+      const newUser = {
+        id: maxId + 1,
+        login: userLogin,
+        nome: String(nome).trim(),
+        email: String(email).trim().toLowerCase(),
+        departamento: String(departamento || 'GERAL').trim().toUpperCase(),
+        passwordHash: hashPassword(password),
+        role: 'USUARIO',
+        ativo: false,
+        status: 'PENDENTE',
+        criadoPor: 'AUTO_CADASTRO',
+        dataCriacao: new Date().toISOString()
+      };
+
+      users.push(newUser);
+      saveJSON(USERS_FILE, users);
+
+      return sendJSON(res, 201, { message: 'Solicitação de cadastro enviada com sucesso! Aguarde a aprovação do administrador.' });
+    } catch (err) {
+      return sendJSON(res, 400, { error: 'Erro ao processar solicitação de cadastro.' });
+    }
+  }
+
+  // ============================================
   // API DE AUTENTICAÇÃO: /api/auth/login
   // ============================================
   if (pathname === '/api/auth/login' && method === 'POST') {
@@ -122,6 +173,14 @@ const server = http.createServer(async (req, res) => {
 
       if (!user) {
         return sendJSON(res, 401, { error: 'Usuário ou senha incorretos.' });
+      }
+
+      if (user.status === 'PENDENTE') {
+        return sendJSON(res, 403, { error: 'Cadastro aguardando aprovação do administrador. Você será notificado.' });
+      }
+
+      if (user.status === 'REJEITADO') {
+        return sendJSON(res, 403, { error: 'Seu cadastro foi rejeitado. Entre em contato com o Departamento de Tecnologia - 17 3285-9997.' });
       }
 
       if (!user.ativo) {
@@ -160,6 +219,7 @@ const server = http.createServer(async (req, res) => {
         departamento: u.departamento || (u.role !== 'USUARIO' ? 'TECNOLOGIA' : 'GERAL'),
         role: u.role,
         ativo: u.ativo,
+        status: u.status || 'APROVADO',
         criadoPor: u.criadoPor,
         dataCriacao: u.dataCriacao
       }));
@@ -249,6 +309,63 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         return sendJSON(res, 400, { error: 'Erro ao atualizar usuário.' });
       }
+    }
+
+    // PUT /api/users/:id/aprovar (Aprovar cadastro pendente)
+    if (method === 'PUT' && subPath.match(/^\/\d+\/aprovar$/)) {
+      const parts = subPath.split('/');
+      const id = parseInt(parts[1], 10);
+      const index = users.findIndex(u => u.id === id);
+
+      if (index === -1) {
+        return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+      }
+
+      if (users[index].status !== 'PENDENTE') {
+        return sendJSON(res, 400, { error: 'Este usuário não está com cadastro pendente.' });
+      }
+
+      try {
+        const body = await getRequestBody(req);
+
+        // Permite editar dados antes de aprovar
+        if (body.nome) users[index].nome = String(body.nome).trim();
+        if (body.login) users[index].login = String(body.login).trim();
+        if (body.email) users[index].email = String(body.email).trim().toLowerCase();
+        if (body.departamento) users[index].departamento = String(body.departamento).trim().toUpperCase();
+        if (body.role) users[index].role = body.role;
+
+        users[index].ativo = true;
+        users[index].status = 'APROVADO';
+        users[index].aprovadoPor = body.aprovadoPor || 'ADMIN';
+        users[index].dataAprovacao = new Date().toISOString();
+
+        saveJSON(USERS_FILE, users);
+        const { passwordHash, ...safeUser } = users[index];
+        return sendJSON(res, 200, { message: `Usuário "${users[index].login}" aprovado com sucesso!`, user: safeUser });
+      } catch (err) {
+        return sendJSON(res, 400, { error: 'Erro ao aprovar usuário.' });
+      }
+    }
+
+    // PUT /api/users/:id/rejeitar (Rejeitar e excluir cadastro pendente)
+    if (method === 'PUT' && subPath.match(/^\/\d+\/rejeitar$/)) {
+      const parts = subPath.split('/');
+      const id = parseInt(parts[1], 10);
+      const index = users.findIndex(u => u.id === id);
+
+      if (index === -1) {
+        return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+      }
+
+      if (users[index].status !== 'PENDENTE') {
+        return sendJSON(res, 400, { error: 'Apenas cadastros pendentes podem ser rejeitados.' });
+      }
+
+      const nomeRejeitado = users[index].nome;
+      users.splice(index, 1);
+      saveJSON(USERS_FILE, users);
+      return sendJSON(res, 200, { message: `Solicitação de cadastro de "${nomeRejeitado}" foi rejeitada e removida.` });
     }
 
     // PUT /api/users/:id/change-password (Alterar Senha)
