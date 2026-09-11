@@ -76,15 +76,56 @@ const Auth = {
       if (isAdmin) {
         navHtml += `
           <a href="index.html" class="nav-item ${window.location.pathname.includes('index.html') ? 'active' : ''}">🖨️ Controle de Toners</a>
-          <a href="usuarios.html" class="nav-item ${window.location.pathname.includes('usuarios.html') ? 'active' : ''}">👥 Gerenciar Usuários</a>
+          <a href="usuarios.html" class="nav-item ${window.location.pathname.includes('usuarios.html') ? 'active' : ''}" id="navUsuariosLink">👥 Gerenciar Usuários</a>
           <a href="relatorios.html" class="nav-item ${window.location.pathname.includes('relatorios.html') ? 'active' : ''}">📊 Relatórios</a>
         `;
       }
 
       navContainer.innerHTML = navHtml;
+
+      // Buscar contagem de pendentes e exibir badge vermelho no menu
+      if (isAdmin) {
+        this._updatePendingNavBadge();
+      }
     }
 
     this.injectPasswordModalHTML();
+  },
+
+  // Busca pendentes e injeta badge vermelho ao lado de "Gerenciar Usuários"
+  _updatePendingNavBadge() {
+    fetch('/api/users', {
+      headers: { 'Authorization': 'Bearer ' + this.getToken() }
+    })
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(users) {
+        var count = users.filter(function(u) { return u.status === 'PENDENTE'; }).length;
+        var link = document.getElementById('navUsuariosLink');
+        if (!link) return;
+        var old = link.querySelector('.nav-pending-badge');
+        if (old) old.remove();
+        if (count > 0) {
+          var badge = document.createElement('span');
+          badge.className = 'nav-pending-badge';
+          badge.textContent = count;
+          badge.style.display = 'inline-flex';
+          badge.style.alignItems = 'center';
+          badge.style.justifyContent = 'center';
+          badge.style.minWidth = '18px';
+          badge.style.height = '18px';
+          badge.style.padding = '0 4px';
+          badge.style.borderRadius = '9px';
+          badge.style.background = '#e53e3e';
+          badge.style.color = 'white';
+          badge.style.fontSize = '0.68rem';
+          badge.style.fontWeight = 'bold';
+          badge.style.marginLeft = '6px';
+          badge.style.verticalAlign = 'middle';
+          badge.style.lineHeight = '1';
+          link.appendChild(badge);
+        }
+      })
+      .catch(function() {/* silencioso */});
   },
 
   // Injetar Modal de Alteração de Própria Senha no DOM
@@ -130,7 +171,7 @@ const Auth = {
       try {
         const res = await fetch(`/api/users/${user.id}/change-password`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + this.getToken() },
           body: JSON.stringify({ currentPassword, newPassword, isAdminReset: false })
         });
 

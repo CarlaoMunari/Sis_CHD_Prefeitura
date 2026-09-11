@@ -52,7 +52,7 @@ function saveJSON(filePath, data) {
     return true;
   } catch (err) {
     console.error(`Erro ao salvar ${filePath}:`, err);
-    return false;
+    throw new Error('Falha ao salvar dados no servidor. Verifique as permissões do sistema de arquivos.');
   }
 }
 
@@ -146,7 +146,7 @@ const server = http.createServer(async (req, res) => {
 
       return sendJSON(res, 201, { message: 'Solicitação de cadastro enviada com sucesso! Aguarde a aprovação do administrador.' });
     } catch (err) {
-      return sendJSON(res, 400, { error: 'Erro ao processar solicitação de cadastro.' });
+      return sendJSON(res, 500, { error: err.message || 'Erro ao processar solicitação de cadastro.' });
     }
   }
 
@@ -273,7 +273,7 @@ const server = http.createServer(async (req, res) => {
         const { passwordHash, ...safeNewUser } = newUser;
         return sendJSON(res, 201, safeNewUser);
       } catch (err) {
-        return sendJSON(res, 400, { error: 'Erro ao criar usuário.' });
+        return sendJSON(res, 500, { error: err.message || 'Erro ao criar usuário.' });
       }
     }
 
@@ -398,7 +398,7 @@ const server = http.createServer(async (req, res) => {
 
         return sendJSON(res, 200, { message: `Senha do usuário ${users[userIndex].login} alterada com sucesso!` });
       } catch (err) {
-        return sendJSON(res, 400, { error: 'Erro ao alterar senha.' });
+        return sendJSON(res, 500, { error: err.message || 'Erro ao alterar senha.' });
       }
     }
 
