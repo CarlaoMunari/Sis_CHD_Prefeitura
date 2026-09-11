@@ -3,12 +3,40 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const crypto = require('crypto');
+const { Pool } = require('pg');
+
+// Carregar .env localmente se existir
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  fs.readFileSync(envPath, 'utf8').split(/\r?\n/).forEach(line => {
+    line = line.trim();
+    if (line && !line.startsWith('#')) {
+      const idx = line.indexOf('=');
+      if (idx !== -1) {
+        const k = line.substring(0, idx).trim();
+        const v = line.substring(idx + 1).trim();
+        if (!process.env[k]) process.env[k] = v;
+      }
+    }
+  });
+}
 
 const PORT = process.env.PORT || 3000;
-const TONERS_FILE = path.join(__dirname, 'toners_backup_49.json');
-const USERS_FILE = path.join(__dirname, 'database', 'users.json');
-const TICKETS_FILE = path.join(__dirname, 'database', 'tickets.json');
 const SALT = 'toners_system_salt_2026';
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  console.error('⚠️ AVISO: DATABASE_URL não está definida nas variáveis de ambiente!');
+}
+
+// Conexão com Supabase PostgreSQL via Pool
+const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: { rejectUnauthorized: false },
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000
+});
 
 // Content Types para servir arquivos estáticos
 const MIME_TYPES = {
@@ -26,34 +54,6 @@ const MIME_TYPES = {
 // Hashing de senha (SHA-256 HMAC)
 function hashPassword(password) {
   return crypto.createHmac('sha256', SALT).update(password).digest('hex');
-}
-
-// Ler JSON genérico
-function loadJSON(filePath) {
-  try {
-    if (fs.existsSync(filePath)) {
-      const data = fs.readFileSync(filePath, 'utf8');
-      return JSON.parse(data);
-    }
-  } catch (err) {
-    console.error(`Erro ao ler ${filePath}:`, err);
-  }
-  return [];
-}
-
-// Salvar JSON genérico
-function saveJSON(filePath, data) {
-  try {
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    return true;
-  } catch (err) {
-    console.error(`Erro ao salvar ${filePath}:`, err);
-    throw new Error('Falha ao salvar dados no servidor. Verifique as permissões do sistema de arquivos.');
-  }
 }
 
 // Auxiliar para enviar resposta JSON
@@ -115,37 +115,35 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { error: 'A senha deve ter pelo menos 4 caracteres.' });
       }
 
-      const users = loadJSON(USERS_FILE);
       const userLogin = login.trim();
+      const userEmail = email.trim().toLowerCase();
 
-      // Validar duplicatas (incluindo pendentes)
-      if (users.some(u =>
-        u.email.toLowerCase() === email.toLowerCase().trim() ||
-        (u.login && u.login.toLowerCase() === userLogin.toLowerCase())
-      )) {
+      // Validar duplicatas (email ou login)
+      const dupRes = await pool.query(
+        'SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(login) = $2',
+        [userEmail, userLogin.toLowerCase()]
+      );
+
+      if (dupRes.rows.length > 0) {
         return sendJSON(res, 400, { error: 'Este e-mail ou nome de usuário já está cadastrado ou com cadastro pendente.' });
       }
 
-      const maxId = users.reduce((max, u) => (u.id > max ? u.id : max), 0);
-      const newUser = {
-        id: maxId + 1,
-        login: userLogin,
-        nome: String(nome).trim(),
-        email: String(email).trim().toLowerCase(),
-        departamento: String(departamento || 'GERAL').trim().toUpperCase(),
-        passwordHash: hashPassword(password),
-        role: 'USUARIO',
-        ativo: false,
-        status: 'PENDENTE',
-        criadoPor: 'AUTO_CADASTRO',
-        dataCriacao: new Date().toISOString()
-      };
-
-      users.push(newUser);
-      saveJSON(USERS_FILE, users);
+      await pool.query(
+        `INSERT INTO users
+          (login, nome, email, departamento, password_hash, role, ativo, status, criado_por, data_criacao)
+         VALUES ($1, $2, $3, $4, $5, 'USUARIO', false, 'PENDENTE', 'AUTO_CADASTRO', NOW())`,
+        [
+          userLogin,
+          String(nome).trim(),
+          userEmail,
+          String(departamento || 'GERAL').trim().toUpperCase(),
+          hashPassword(password)
+        ]
+      );
 
       return sendJSON(res, 201, { message: 'Solicitação de cadastro enviada com sucesso! Aguarde a aprovação do administrador.' });
     } catch (err) {
+      console.error('Erro /api/register:', err);
       return sendJSON(res, 500, { error: err.message || 'Erro ao processar solicitação de cadastro.' });
     }
   }
@@ -163,17 +161,18 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { error: 'Usuário/E-mail e senha são obrigatórios.' });
       }
 
-      const users = loadJSON(USERS_FILE);
       const hashed = hashPassword(password);
-
-      const user = users.find(u => 
-        ((u.login && u.login.toLowerCase() === loginTerm) || (u.email && u.email.toLowerCase() === loginTerm)) && 
-        u.passwordHash === hashed
+      const userRes = await pool.query(
+        `SELECT * FROM users
+         WHERE (LOWER(login) = $1 OR LOWER(email) = $1) AND password_hash = $2`,
+        [loginTerm, hashed]
       );
 
-      if (!user) {
+      if (userRes.rows.length === 0) {
         return sendJSON(res, 401, { error: 'Usuário ou senha incorretos.' });
       }
+
+      const user = userRes.rows[0];
 
       if (user.status === 'PENDENTE') {
         return sendJSON(res, 403, { error: 'Cadastro aguardando aprovação do administrador. Você será notificado.' });
@@ -188,17 +187,19 @@ const server = http.createServer(async (req, res) => {
       }
 
       const token = `token_${user.id}_${Date.now()}`;
-      const userPayload = { 
-        id: user.id, 
-        login: user.login || user.email, 
-        nome: user.nome, 
-        email: user.email, 
+      const userPayload = {
+        id: user.id,
+        login: user.login || user.email,
+        nome: user.nome,
+        email: user.email,
         departamento: user.departamento || (user.role !== 'USUARIO' ? 'TECNOLOGIA' : 'GERAL'),
-        role: user.role 
+        role: user.role
       };
+
       return sendJSON(res, 200, { token, user: userPayload });
     } catch (err) {
-      return sendJSON(res, 400, { error: 'Requisição inválida.' });
+      console.error('Erro /api/auth/login:', err);
+      return sendJSON(res, 500, { error: err.message || 'Requisição inválida.' });
     }
   }
 
@@ -206,27 +207,25 @@ const server = http.createServer(async (req, res) => {
   // API DE GESTÃO DE USUÁRIOS: /api/users
   // ============================================
   if (pathname.startsWith('/api/users')) {
-    const users = loadJSON(USERS_FILE);
     const subPath = pathname.replace('/api/users', '');
 
     // GET /api/users
     if (method === 'GET' && (subPath === '' || subPath === '/')) {
-      const safeUsers = users.map(u => ({
-        id: u.id,
-        login: u.login || u.email,
-        nome: u.nome,
-        email: u.email,
-        departamento: u.departamento || (u.role !== 'USUARIO' ? 'TECNOLOGIA' : 'GERAL'),
-        role: u.role,
-        ativo: u.ativo,
-        status: u.status || 'APROVADO',
-        criadoPor: u.criadoPor,
-        dataCriacao: u.dataCriacao
-      }));
-      return sendJSON(res, 200, safeUsers);
+      try {
+        const result = await pool.query(
+          `SELECT
+             id, login, nome, email, departamento, role, ativo, status,
+             criado_por AS "criadoPor", data_criacao AS "dataCriacao"
+           FROM users ORDER BY id ASC`
+        );
+        return sendJSON(res, 200, result.rows);
+      } catch (err) {
+        console.error('Erro GET /api/users:', err);
+        return sendJSON(res, 500, { error: 'Erro ao carregar usuários.' });
+      }
     }
 
-    // POST /api/users (Criar usuário)
+    // POST /api/users (Criar usuário pelo Admin)
     if (method === 'POST' && (subPath === '' || subPath === '/')) {
       try {
         const body = await getRequestBody(req);
@@ -237,147 +236,51 @@ const server = http.createServer(async (req, res) => {
         }
 
         const userLogin = (login || email.split('@')[0]).trim();
+        const userEmail = email.trim().toLowerCase();
 
-        // Validar e-mail e login duplicados
-        if (users.some(u => u.email.toLowerCase() === email.toLowerCase().trim() || (u.login && u.login.toLowerCase() === userLogin.toLowerCase()))) {
+        // Validar duplicatas
+        const dupRes = await pool.query(
+          'SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(login) = $2',
+          [userEmail, userLogin.toLowerCase()]
+        );
+        if (dupRes.rows.length > 0) {
           return sendJSON(res, 400, { error: 'Este e-mail ou nome de usuário já está cadastrado.' });
         }
 
-        // REGRA DE NEGÓCIO RBAC & DEPARTAMENTO:
-        // ADMIN só pode criar contas de 'USUARIO'
-        const creator = users.find(u => u.email.toLowerCase() === (criadoPor || '').toLowerCase().trim() || (u.login && u.login.toLowerCase() === (criadoPor || '').toLowerCase().trim()));
-        if (creator && creator.role === 'ADMIN' && role !== 'USUARIO') {
-          return sendJSON(res, 403, { error: 'Administradores só podem criar contas de perfil USUÁRIO.' });
+        // REGRA DE NEGÓCIO RBAC: ADMIN só cria 'USUARIO'
+        if (criadoPor) {
+          const creatorRes = await pool.query(
+            'SELECT role FROM users WHERE LOWER(email) = $1 OR LOWER(login) = $2',
+            [criadoPor.toLowerCase().trim(), criadoPor.toLowerCase().trim()]
+          );
+          if (creatorRes.rows.length > 0 && creatorRes.rows[0].role === 'ADMIN' && role !== 'USUARIO') {
+            return sendJSON(res, 403, { error: 'Administradores só podem criar contas de perfil USUÁRIO.' });
+          }
         }
 
-        // Admins pertencem obrigatoriamente ao departamento TECNOLOGIA
         const userDept = (role === 'ADMIN' || role === 'SUPER_ADMIN') ? 'TECNOLOGIA' : (departamento ? String(departamento).trim().toUpperCase() : 'GERAL');
 
-        const maxId = users.reduce((max, u) => (u.id > max ? u.id : max), 0);
-        const newUser = {
-          id: maxId + 1,
-          login: userLogin,
-          nome: String(nome).trim(),
-          email: String(email).trim().toLowerCase(),
-          departamento: userDept,
-          passwordHash: hashPassword(password),
-          role: role,
-          ativo: true,
-          criadoPor: criadoPor || 'ADMIN',
-          dataCriacao: new Date().toISOString()
-        };
+        const insertRes = await pool.query(
+          `INSERT INTO users
+            (login, nome, email, departamento, password_hash, role, ativo, status, criado_por, data_criacao)
+           VALUES ($1, $2, $3, $4, $5, $6, true, 'APROVADO', $7, NOW())
+           RETURNING
+            id, login, nome, email, departamento, role, ativo, status,
+            criado_por AS "criadoPor", data_criacao AS "dataCriacao"`,
+          [userLogin, String(nome).trim(), userEmail, userDept, hashPassword(password), role, criadoPor || 'ADMIN']
+        );
 
-        users.push(newUser);
-        saveJSON(USERS_FILE, users);
-
-        const { passwordHash, ...safeNewUser } = newUser;
-        return sendJSON(res, 201, safeNewUser);
+        return sendJSON(res, 201, insertRes.rows[0]);
       } catch (err) {
+        console.error('Erro POST /api/users:', err);
         return sendJSON(res, 500, { error: err.message || 'Erro ao criar usuário.' });
       }
     }
 
-    // PUT /api/users/:id (Editar dados do usuário pelo Admin)
-    if (method === 'PUT' && subPath.match(/^\/\d+$/)) {
-      const id = parseInt(subPath.substring(1), 10);
-      const index = users.findIndex(u => u.id === id);
-
-      if (index === -1) {
-        return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
-      }
-
-      try {
-        const body = await getRequestBody(req);
-        const user = users[index];
-
-        if (body.nome) user.nome = String(body.nome).trim();
-        if (body.email) user.email = String(body.email).trim().toLowerCase();
-        if (body.login) user.login = String(body.login).trim();
-        if (body.role) user.role = body.role;
-
-        // Se for admin/super_admin, departamento é sempre TECNOLOGIA
-        if (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') {
-          user.departamento = 'TECNOLOGIA';
-        } else if (body.departamento) {
-          user.departamento = String(body.departamento).trim().toUpperCase();
-        }
-
-        saveJSON(USERS_FILE, users);
-
-        const { passwordHash, ...safeUser } = user;
-        return sendJSON(res, 200, { message: 'Dados do usuário atualizados com sucesso!', user: safeUser });
-      } catch (err) {
-        return sendJSON(res, 400, { error: 'Erro ao atualizar usuário.' });
-      }
-    }
-
-    // PUT /api/users/:id/aprovar (Aprovar cadastro pendente)
-    if (method === 'PUT' && subPath.match(/^\/\d+\/aprovar$/)) {
-      const parts = subPath.split('/');
-      const id = parseInt(parts[1], 10);
-      const index = users.findIndex(u => u.id === id);
-
-      if (index === -1) {
-        return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
-      }
-
-      if (users[index].status !== 'PENDENTE') {
-        return sendJSON(res, 400, { error: 'Este usuário não está com cadastro pendente.' });
-      }
-
-      try {
-        const body = await getRequestBody(req);
-
-        // Permite editar dados antes de aprovar
-        if (body.nome) users[index].nome = String(body.nome).trim();
-        if (body.login) users[index].login = String(body.login).trim();
-        if (body.email) users[index].email = String(body.email).trim().toLowerCase();
-        if (body.departamento) users[index].departamento = String(body.departamento).trim().toUpperCase();
-        if (body.role) users[index].role = body.role;
-
-        users[index].ativo = true;
-        users[index].status = 'APROVADO';
-        users[index].aprovadoPor = body.aprovadoPor || 'ADMIN';
-        users[index].dataAprovacao = new Date().toISOString();
-
-        saveJSON(USERS_FILE, users);
-        const { passwordHash, ...safeUser } = users[index];
-        return sendJSON(res, 200, { message: `Usuário "${users[index].login}" aprovado com sucesso!`, user: safeUser });
-      } catch (err) {
-        return sendJSON(res, 400, { error: 'Erro ao aprovar usuário.' });
-      }
-    }
-
-    // PUT /api/users/:id/rejeitar (Rejeitar e excluir cadastro pendente)
-    if (method === 'PUT' && subPath.match(/^\/\d+\/rejeitar$/)) {
-      const parts = subPath.split('/');
-      const id = parseInt(parts[1], 10);
-      const index = users.findIndex(u => u.id === id);
-
-      if (index === -1) {
-        return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
-      }
-
-      if (users[index].status !== 'PENDENTE') {
-        return sendJSON(res, 400, { error: 'Apenas cadastros pendentes podem ser rejeitados.' });
-      }
-
-      const nomeRejeitado = users[index].nome;
-      users.splice(index, 1);
-      saveJSON(USERS_FILE, users);
-      return sendJSON(res, 200, { message: `Solicitação de cadastro de "${nomeRejeitado}" foi rejeitada e removida.` });
-    }
-
     // PUT /api/users/:id/change-password (Alterar Senha)
-    if (method === 'PUT' && subPath.match(/^\/\d+\/change-password$/)) {
-      const parts = subPath.split('/');
-      const id = parseInt(parts[1], 10);
-      const userIndex = users.findIndex(u => u.id === id);
-
-      if (userIndex === -1) {
-        return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
-      }
-
+    const changePassMatch = subPath.match(/^\/(\d+)\/change-password$/);
+    if (method === 'PUT' && changePassMatch) {
+      const id = parseInt(changePassMatch[1], 10);
       try {
         const body = await getRequestBody(req);
         const { newPassword, currentPassword, isAdminReset } = body;
@@ -386,35 +289,155 @@ const server = http.createServer(async (req, res) => {
           return sendJSON(res, 400, { error: 'A nova senha deve conter pelo menos 4 caracteres.' });
         }
 
+        const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+        if (userRes.rows.length === 0) {
+          return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+        }
+        const user = userRes.rows[0];
+
         if (!isAdminReset) {
           const hashedCurrent = hashPassword(currentPassword || '');
-          if (users[userIndex].passwordHash !== hashedCurrent) {
+          if (user.password_hash !== hashedCurrent) {
             return sendJSON(res, 400, { error: 'A senha atual informada está incorreta.' });
           }
         }
 
-        users[userIndex].passwordHash = hashPassword(newPassword);
-        saveJSON(USERS_FILE, users);
-
-        return sendJSON(res, 200, { message: `Senha do usuário ${users[userIndex].login} alterada com sucesso!` });
+        await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(newPassword), id]);
+        return sendJSON(res, 200, { message: `Senha do usuário ${user.login} alterada com sucesso!` });
       } catch (err) {
+        console.error('Erro change-password:', err);
         return sendJSON(res, 500, { error: err.message || 'Erro ao alterar senha.' });
       }
     }
 
+    // PUT /api/users/:id/aprovar (Aprovar cadastro pendente)
+    const aprovarMatch = subPath.match(/^\/(\d+)\/aprovar$/);
+    if (method === 'PUT' && aprovarMatch) {
+      const id = parseInt(aprovarMatch[1], 10);
+      try {
+        const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+        if (userRes.rows.length === 0) {
+          return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+        }
+        const user = userRes.rows[0];
+        if (user.status !== 'PENDENTE') {
+          return sendJSON(res, 400, { error: 'Este usuário não está com cadastro pendente.' });
+        }
+
+        const body = await getRequestBody(req);
+        const novoNome = body.nome ? String(body.nome).trim() : user.nome;
+        const novoLogin = body.login ? String(body.login).trim() : user.login;
+        const novoEmail = body.email ? String(body.email).trim().toLowerCase() : user.email;
+        const novoDepto = body.departamento ? String(body.departamento).trim().toUpperCase() : user.departamento;
+        const novoRole = body.role || user.role;
+
+        const updateRes = await pool.query(
+          `UPDATE users
+           SET status = 'APROVADO',
+               ativo = true,
+               aprovado_por = $1,
+               data_aprovacao = NOW(),
+               nome = $2,
+               login = $3,
+               email = $4,
+               departamento = $5,
+               role = $6
+           WHERE id = $7
+           RETURNING
+            id, login, nome, email, departamento, role, ativo, status,
+            criado_por AS "criadoPor", data_criacao AS "dataCriacao"`,
+          [body.aprovadoPor || 'ADMIN', novoNome, novoLogin, novoEmail, novoDepto, novoRole, id]
+        );
+
+        return sendJSON(res, 200, { message: `Usuário "${novoLogin}" aprovado com sucesso!`, user: updateRes.rows[0] });
+      } catch (err) {
+        console.error('Erro /aprovar:', err);
+        return sendJSON(res, 500, { error: err.message || 'Erro ao aprovar usuário.' });
+      }
+    }
+
+    // PUT /api/users/:id/rejeitar (Rejeitar e excluir cadastro pendente)
+    const rejeitarMatch = subPath.match(/^\/(\d+)\/rejeitar$/);
+    if (method === 'PUT' && rejeitarMatch) {
+      const id = parseInt(rejeitarMatch[1], 10);
+      try {
+        const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+        if (userRes.rows.length === 0) {
+          return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+        }
+        const user = userRes.rows[0];
+        if (user.status !== 'PENDENTE') {
+          return sendJSON(res, 400, { error: 'Apenas cadastros pendentes podem ser rejeitados.' });
+        }
+
+        await pool.query('DELETE FROM users WHERE id = $1', [id]);
+        return sendJSON(res, 200, { message: `Solicitação de cadastro de "${user.nome}" foi rejeitada e removida.` });
+      } catch (err) {
+        console.error('Erro /rejeitar:', err);
+        return sendJSON(res, 500, { error: err.message || 'Erro ao rejeitar cadastro.' });
+      }
+    }
+
+    // PUT /api/users/:id (Editar dados do usuário pelo Admin)
+    const editUserMatch = subPath.match(/^\/(\d+)$/);
+    if (method === 'PUT' && editUserMatch) {
+      const id = parseInt(editUserMatch[1], 10);
+      try {
+        const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+        if (userRes.rows.length === 0) {
+          return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+        }
+        const user = userRes.rows[0];
+        const body = await getRequestBody(req);
+
+        const novoNome = body.nome ? String(body.nome).trim() : user.nome;
+        const novoLogin = body.login ? String(body.login).trim() : user.login;
+        const novoEmail = body.email ? String(body.email).trim().toLowerCase() : user.email;
+        const novoRole = body.role || user.role;
+
+        let novoDepto = user.departamento;
+        if (novoRole === 'ADMIN' || novoRole === 'SUPER_ADMIN') {
+          novoDepto = 'TECNOLOGIA';
+        } else if (body.departamento) {
+          novoDepto = String(body.departamento).trim().toUpperCase();
+        }
+
+        const updateRes = await pool.query(
+          `UPDATE users
+           SET nome = $1, login = $2, email = $3, role = $4, departamento = $5
+           WHERE id = $6
+           RETURNING
+            id, login, nome, email, departamento, role, ativo, status,
+            criado_por AS "criadoPor", data_criacao AS "dataCriacao"`,
+          [novoNome, novoLogin, novoEmail, novoRole, novoDepto, id]
+        );
+
+        return sendJSON(res, 200, { message: 'Dados do usuário atualizados com sucesso!', user: updateRes.rows[0] });
+      } catch (err) {
+        console.error('Erro PUT /api/users/:id:', err);
+        return sendJSON(res, 500, { error: err.message || 'Erro ao atualizar usuário.' });
+      }
+    }
+
     // DELETE /api/users/:id
-    if (method === 'DELETE' && subPath.match(/^\/\d+$/)) {
-      const id = parseInt(subPath.substring(1), 10);
-      const index = users.findIndex(u => u.id === id);
-      if (index === -1) {
-        return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+    const deleteUserMatch = subPath.match(/^\/(\d+)$/);
+    if (method === 'DELETE' && deleteUserMatch) {
+      const id = parseInt(deleteUserMatch[1], 10);
+      try {
+        const userRes = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+        if (userRes.rows.length === 0) {
+          return sendJSON(res, 404, { error: 'Usuário não encontrado.' });
+        }
+        if (userRes.rows[0].role === 'SUPER_ADMIN') {
+          return sendJSON(res, 403, { error: 'Não é possível excluir a conta de SUPER_ADMIN principal.' });
+        }
+
+        await pool.query('DELETE FROM users WHERE id = $1', [id]);
+        return sendJSON(res, 200, { message: 'Usuário excluído com sucesso.' });
+      } catch (err) {
+        console.error('Erro DELETE /api/users/:id:', err);
+        return sendJSON(res, 500, { error: err.message || 'Erro ao excluir usuário.' });
       }
-      if (users[index].role === 'SUPER_ADMIN') {
-        return sendJSON(res, 403, { error: 'Não é possível excluir a conta de SUPER_ADMIN principal.' });
-      }
-      users.splice(index, 1);
-      saveJSON(USERS_FILE, users);
-      return sendJSON(res, 200, { message: 'Usuário excluído com sucesso.' });
     }
   }
 
@@ -422,12 +445,36 @@ const server = http.createServer(async (req, res) => {
   // API DE CHAMADOS (TICKETS): /api/tickets
   // ============================================
   if (pathname.startsWith('/api/tickets')) {
-    const tickets = loadJSON(TICKETS_FILE);
     const subPath = pathname.replace('/api/tickets', '');
 
     // GET /api/tickets
     if (method === 'GET' && (subPath === '' || subPath === '/')) {
-      return sendJSON(res, 200, tickets);
+      try {
+        const result = await pool.query(`
+          SELECT
+            id, codigo,
+            solicitante_id AS "solicitanteId",
+            solicitante_nome AS "solicitanteNome",
+            solicitante_email AS "solicitanteEmail",
+            solicitante_departamento AS "solicitanteDepartamento",
+            categoria,
+            detalhes_toner AS "detalhesToner",
+            descricao,
+            status,
+            prioridade,
+            atendido_por AS "atendidoPor",
+            baixa_estoque_realizada AS "baixaEstoqueRealizada",
+            data_abertura AS "dataAbertura",
+            data_finalizacao AS "dataFinalizacao",
+            historico
+          FROM tickets
+          ORDER BY id DESC
+        `);
+        return sendJSON(res, 200, result.rows);
+      } catch (err) {
+        console.error('Erro GET /api/tickets:', err);
+        return sendJSON(res, 500, { error: 'Erro ao carregar chamados.' });
+      }
     }
 
     // POST /api/tickets (Criar chamado)
@@ -440,58 +487,170 @@ const server = http.createServer(async (req, res) => {
           return sendJSON(res, 400, { error: 'Solicitante, Categoria e Descrição são obrigatórios.' });
         }
 
-        const maxId = tickets.reduce((max, t) => (t.id > max ? t.id : max), 0);
-        const newId = maxId + 1;
+        const nextIdRes = await pool.query('SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM tickets');
+        const newId = parseInt(nextIdRes.rows[0].next_id, 10);
         const codigo = `CHM-2026-${String(newId).padStart(4, '0')}`;
 
-        const newTicket = {
-          id: newId,
-          codigo: codigo,
-          solicitanteId: solicitanteId || 0,
-          solicitanteNome: String(solicitanteNome).trim(),
-          solicitanteEmail: String(solicitanteEmail || '').trim(),
-          solicitanteDepartamento: String(solicitanteDepartamento || 'GERAL').toUpperCase(),
-          categoria: categoria,
-          detalhesToner: detalhesToner || null,
-          descricao: String(descricao).trim(),
-          status: 'ABERTO',
-          prioridade: prioridade || 'NORMAL',
-          atendidoPor: null,
-          baixaEstoqueRealizada: false,
-          dataAbertura: new Date().toISOString(),
-          dataFinalizacao: null,
-          historico: [
-            {
-              data: new Date().toISOString(),
-              usuario: solicitanteNome,
-              acao: 'Chamado aberto no sistema.'
-            }
-          ]
-        };
+        const historico = [
+          {
+            data: new Date().toISOString(),
+            usuario: solicitanteNome,
+            acao: 'Chamado aberto no sistema.'
+          }
+        ];
 
-        tickets.push(newTicket);
-        saveJSON(TICKETS_FILE, tickets);
-        return sendJSON(res, 201, newTicket);
+        const insertRes = await pool.query(
+          `INSERT INTO tickets
+            (codigo, solicitante_id, solicitante_nome, solicitante_email, solicitante_departamento,
+             categoria, detalhes_toner, descricao, status, prioridade, atendido_por,
+             baixa_estoque_realizada, data_abertura, data_finalizacao, historico)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'ABERTO', $9, NULL, false, NOW(), NULL, $10)
+           RETURNING
+            id, codigo,
+            solicitante_id AS "solicitanteId",
+            solicitante_nome AS "solicitanteNome",
+            solicitante_email AS "solicitanteEmail",
+            solicitante_departamento AS "solicitanteDepartamento",
+            categoria,
+            detalhes_toner AS "detalhesToner",
+            descricao,
+            status,
+            prioridade,
+            atendido_por AS "atendidoPor",
+            baixa_estoque_realizada AS "baixaEstoqueRealizada",
+            data_abertura AS "dataAbertura",
+            data_finalizacao AS "dataFinalizacao",
+            historico`,
+          [
+            codigo,
+            solicitanteId || 0,
+            String(solicitanteNome).trim(),
+            String(solicitanteEmail || '').trim(),
+            String(solicitanteDepartamento || 'GERAL').toUpperCase(),
+            categoria,
+            detalhesToner ? JSON.stringify(detalhesToner) : null,
+            String(descricao).trim(),
+            prioridade || 'NORMAL',
+            JSON.stringify(historico)
+          ]
+        );
+
+        return sendJSON(res, 201, insertRes.rows[0]);
       } catch (err) {
-        return sendJSON(res, 400, { error: 'Erro ao registrar chamado.' });
+        console.error('Erro POST /api/tickets:', err);
+        return sendJSON(res, 500, { error: err.message || 'Erro ao registrar chamado.' });
+      }
+    }
+
+    // POST /api/tickets/:id/finalizar (Finalizar chamado & Dar Baixa Automática no Estoque)
+    const finalizarMatch = subPath.match(/^\/(\d+)\/finalizar$/);
+    if (method === 'POST' && finalizarMatch) {
+      const id = parseInt(finalizarMatch[1], 10);
+      try {
+        const ticketRes = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
+        if (ticketRes.rows.length === 0) {
+          return sendJSON(res, 404, { error: 'Chamado não encontrado.' });
+        }
+        const ticket = ticketRes.rows[0];
+        let historico = Array.isArray(ticket.historico) ? ticket.historico : (typeof ticket.historico === 'string' ? JSON.parse(ticket.historico) : []);
+        let mensagemEstoque = '';
+        let baixaRealizada = ticket.baixa_estoque_realizada;
+
+        let detalhesToner = ticket.detalhes_toner;
+        if (typeof detalhesToner === 'string') detalhesToner = JSON.parse(detalhesToner);
+
+        if (ticket.categoria === 'Solicitação de Toners e Tintas' && detalhesToner && detalhesToner.itens && !baixaRealizada) {
+          let itensDescontados = 0;
+
+          for (const item of detalhesToner.itens) {
+            let tonerRow = null;
+            if (item.tonerId) {
+              const tRes = await pool.query('SELECT * FROM toners WHERE id = $1', [item.tonerId]);
+              if (tRes.rows.length > 0) tonerRow = tRes.rows[0];
+            }
+            if (!tonerRow && item.marca && item.modelo) {
+              const tRes = await pool.query('SELECT * FROM toners WHERE marca = $1 AND modelo = $2', [item.marca, item.modelo]);
+              if (tRes.rows.length > 0) tonerRow = tRes.rows[0];
+            }
+
+            if (tonerRow) {
+              const isInk = tonerRow.toner.toLowerCase().includes('tank') || tonerRow.toner.toLowerCase().includes('tinta');
+              if (!isInk) {
+                const qtdDesconto = parseInt(item.quantidadeSolicitada) || 1;
+                const novaQtd = Math.max(0, tonerRow.quantidade - qtdDesconto);
+                const realizarPedido = novaQtd <= tonerRow.estoque_minimo;
+                await pool.query(
+                  'UPDATE toners SET quantidade = $1, realizar_pedido = $2 WHERE toner = $3',
+                  [novaQtd, realizarPedido, tonerRow.toner]
+                );
+                itensDescontados += qtdDesconto;
+              }
+            }
+          }
+          baixaRealizada = true;
+          mensagemEstoque = ` Baixa automática no estoque realizada (${itensDescontados} unidade(s)).`;
+        }
+
+        historico.push({
+          data: new Date().toISOString(),
+          usuario: 'ADMIN',
+          acao: `Chamado finalizado.${mensagemEstoque}`
+        });
+
+        const updateRes = await pool.query(
+          `UPDATE tickets
+           SET status = 'FINALIZADO',
+               data_finalizacao = NOW(),
+               baixa_estoque_realizada = $1,
+               historico = $2
+           WHERE id = $3
+           RETURNING
+            id, codigo,
+            solicitante_id AS "solicitanteId",
+            solicitante_nome AS "solicitanteNome",
+            solicitante_email AS "solicitanteEmail",
+            solicitante_departamento AS "solicitanteDepartamento",
+            categoria,
+            detalhes_toner AS "detalhesToner",
+            descricao,
+            status,
+            prioridade,
+            atendido_por AS "atendidoPor",
+            baixa_estoque_realizada AS "baixaEstoqueRealizada",
+            data_abertura AS "dataAbertura",
+            data_finalizacao AS "dataFinalizacao",
+            historico`,
+          [baixaRealizada, JSON.stringify(historico), id]
+        );
+
+        return sendJSON(res, 200, {
+          message: `Chamado finalizado com sucesso!${mensagemEstoque}`,
+          ticket: updateRes.rows[0]
+        });
+      } catch (err) {
+        console.error('Erro POST /finalizar:', err);
+        return sendJSON(res, 500, { error: err.message || 'Erro ao finalizar chamado.' });
       }
     }
 
     // PUT /api/tickets/:id (Atualizar chamado / alteração por admin)
-    if (method === 'PUT' && subPath.match(/^\/\d+$/)) {
-      const id = parseInt(subPath.substring(1), 10);
-      const index = tickets.findIndex(t => t.id === id);
-      if (index === -1) {
-        return sendJSON(res, 404, { error: 'Chamado não encontrado.' });
-      }
-
+    const editTicketMatch = subPath.match(/^\/(\d+)$/);
+    if (method === 'PUT' && editTicketMatch) {
+      const id = parseInt(editTicketMatch[1], 10);
       try {
+        const ticketRes = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
+        if (ticketRes.rows.length === 0) {
+          return sendJSON(res, 404, { error: 'Chamado não encontrado.' });
+        }
+        const ticket = ticketRes.rows[0];
         const body = await getRequestBody(req);
-        const ticket = tickets[index];
+        let historico = Array.isArray(ticket.historico) ? ticket.historico : (typeof ticket.historico === 'string' ? JSON.parse(ticket.historico) : []);
+        let novoStatus = ticket.status;
+        let novoDetalhesToner = ticket.detalhes_toner;
 
         if (body.status) {
-          ticket.status = body.status;
-          ticket.historico.push({
+          novoStatus = body.status;
+          historico.push({
             data: new Date().toISOString(),
             usuario: 'ADMIN',
             acao: `Status alterado para ${body.status}`
@@ -499,104 +658,120 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (body.detalhesToner) {
-          ticket.detalhesToner = body.detalhesToner;
+          novoDetalhesToner = body.detalhesToner;
           const itensStr = body.detalhesToner.itens ? body.detalhesToner.itens.map(i => `${i.quantidadeSolicitada}x ${i.toner}`).join(', ') : '';
-          ticket.historico.push({
+          historico.push({
             data: new Date().toISOString(),
             usuario: 'ADMIN',
             acao: `Pedido de suprimento alterado pelo Admin: ${body.detalhesToner.modeloImpressora} (${itensStr})`
           });
-        } else if (body.newPrinterModel && ticket.detalhesToner) {
-          ticket.detalhesToner.modeloImpressora = body.newPrinterModel;
-          ticket.historico.push({
+        } else if (body.newPrinterModel && novoDetalhesToner) {
+          if (typeof novoDetalhesToner === 'string') novoDetalhesToner = JSON.parse(novoDetalhesToner);
+          novoDetalhesToner = { ...novoDetalhesToner, modeloImpressora: body.newPrinterModel };
+          historico.push({
             data: new Date().toISOString(),
             usuario: 'ADMIN',
             acao: `Modelo da impressora corrigido para: ${body.newPrinterModel}`
           });
         }
 
-        saveJSON(TICKETS_FILE, tickets);
-        return sendJSON(res, 200, ticket);
+        const updateRes = await pool.query(
+          `UPDATE tickets
+           SET status = $1, detalhes_toner = $2, historico = $3
+           WHERE id = $4
+           RETURNING
+            id, codigo,
+            solicitante_id AS "solicitanteId",
+            solicitante_nome AS "solicitanteNome",
+            solicitante_email AS "solicitanteEmail",
+            solicitante_departamento AS "solicitanteDepartamento",
+            categoria,
+            detalhes_toner AS "detalhesToner",
+            descricao,
+            status,
+            prioridade,
+            atendido_por AS "atendidoPor",
+            baixa_estoque_realizada AS "baixaEstoqueRealizada",
+            data_abertura AS "dataAbertura",
+            data_finalizacao AS "dataFinalizacao",
+            historico`,
+          [novoStatus, novoDetalhesToner ? JSON.stringify(novoDetalhesToner) : null, JSON.stringify(historico), id]
+        );
+
+        return sendJSON(res, 200, updateRes.rows[0]);
       } catch (err) {
-        return sendJSON(res, 400, { error: 'Erro ao atualizar chamado.' });
+        console.error('Erro PUT /api/tickets/:id:', err);
+        return sendJSON(res, 500, { error: err.message || 'Erro ao atualizar chamado.' });
       }
-    }
-
-    // POST /api/tickets/:id/finalizar (Finalizar chamado & Dar Baixa Automática no Estoque)
-    if (method === 'POST' && subPath.match(/^\/\d+\/finalizar$/)) {
-      const parts = subPath.split('/');
-      const id = parseInt(parts[1], 10);
-      const index = tickets.findIndex(t => t.id === id);
-      if (index === -1) {
-        return sendJSON(res, 404, { error: 'Chamado não encontrado.' });
-      }
-
-      const ticket = tickets[index];
-      ticket.status = 'FINALIZADO';
-      ticket.dataFinalizacao = new Date().toISOString();
-
-      let mensagemEstoque = '';
-
-      if (ticket.categoria === 'Solicitação de Toners e Tintas' && ticket.detalhesToner && ticket.detalhesToner.itens && !ticket.baixaEstoqueRealizada) {
-        const toners = loadJSON(TONERS_FILE);
-        let itensDescontados = 0;
-
-        ticket.detalhesToner.itens.forEach(item => {
-          const tonerInStock = toners.find(t => t.id === item.tonerId || (t.marca === item.marca && t.modelo === item.modelo));
-          if (tonerInStock) {
-            const isInk = tonerInStock.toner.toLowerCase().includes('tank') || tonerInStock.toner.toLowerCase().includes('tinta');
-            if (!isInk) {
-              const qtdDesconto = parseInt(item.quantidadeSolicitada) || 1;
-              tonerInStock.quantidade = Math.max(0, tonerInStock.quantidade - qtdDesconto);
-              tonerInStock.realizarPedido = tonerInStock.quantidade <= tonerInStock.estoqueMinimo;
-              itensDescontados += qtdDesconto;
-            }
-          }
-        });
-
-        saveJSON(TONERS_FILE, toners);
-        ticket.baixaEstoqueRealizada = true;
-        mensagemEstoque = ` Baixa automática no estoque realizada (${itensDescontados} unidade(s)).`;
-      }
-
-      ticket.historico.push({
-        data: new Date().toISOString(),
-        usuario: 'ADMIN',
-        acao: `Chamado finalizado.${mensagemEstoque}`
-      });
-
-      saveJSON(TICKETS_FILE, tickets);
-      return sendJSON(res, 200, { message: `Chamado finalizado com sucesso!${mensagemEstoque}`, ticket });
     }
   }
 
   // ============================================
-  // API DE TONERS: /api/toners...
+  // API DE TONERS: /api/toners
   // ============================================
   if (pathname.startsWith('/api/toners')) {
-    const toners = loadJSON(TONERS_FILE);
     const subPath = pathname.replace('/api/toners', '');
 
     // GET /api/toners/stats
     if (method === 'GET' && subPath === '/stats') {
-      const total = toners.length;
-      const zerados = toners.filter(t => t.quantidade === 0).length;
-      const criticos = toners.filter(t => t.realizarPedido || t.quantidade <= t.estoqueMinimo).length;
-      const marcas = [...new Set(toners.map(t => t.marca))].length;
-      return sendJSON(res, 200, { total, zerados, criticos, marcas });
+      try {
+        const statsRes = await pool.query(`
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE quantidade = 0)::int AS zerados,
+            COUNT(*) FILTER (WHERE realizar_pedido = true OR quantidade <= estoque_minimo)::int AS criticos,
+            COUNT(DISTINCT marca)::int AS marcas
+          FROM toners
+        `);
+        const s = statsRes.rows[0];
+        return sendJSON(res, 200, {
+          total: s.total || 0,
+          zerados: s.zerados || 0,
+          criticos: s.criticos || 0,
+          marcas: s.marcas || 0
+        });
+      } catch (err) {
+        console.error('Erro /api/toners/stats:', err);
+        return sendJSON(res, 500, { error: 'Erro ao obter estatísticas' });
+      }
     }
 
     // GET /api/toners
     if (method === 'GET' && (subPath === '' || subPath === '/')) {
-      return sendJSON(res, 200, toners);
+      try {
+        const result = await pool.query(`
+          SELECT
+            id, marca, modelo, toner, quantidade,
+            estoque_minimo AS "estoqueMinimo",
+            realizar_pedido AS "realizarPedido"
+          FROM toners
+          ORDER BY id ASC
+        `);
+        return sendJSON(res, 200, result.rows);
+      } catch (err) {
+        console.error('Erro GET /api/toners:', err);
+        return sendJSON(res, 500, { error: 'Erro ao carregar toners' });
+      }
     }
 
     // GET /api/toners/:id
-    if (method === 'GET' && subPath.match(/^\/\d+$/)) {
-      const id = parseInt(subPath.substring(1), 10);
-      const item = toners.find(t => t.id === id);
-      if (!item) return sendJSON(res, 404, { error: 'Toner não encontrado' });
-      return sendJSON(res, 200, item);
+    const getTonerMatch = subPath.match(/^\/(\d+)$/);
+    if (method === 'GET' && getTonerMatch) {
+      const id = parseInt(getTonerMatch[1], 10);
+      try {
+        const result = await pool.query(`
+          SELECT
+            id, marca, modelo, toner, quantidade,
+            estoque_minimo AS "estoqueMinimo",
+            realizar_pedido AS "realizarPedido"
+          FROM toners WHERE id = $1
+        `, [id]);
+        if (result.rows.length === 0) return sendJSON(res, 404, { error: 'Toner não encontrado' });
+        return sendJSON(res, 200, result.rows[0]);
+      } catch (err) {
+        console.error('Erro GET /api/toners/:id:', err);
+        return sendJSON(res, 500, { error: 'Erro ao buscar toner' });
+      }
     }
 
     // POST /api/toners
@@ -606,66 +781,82 @@ const server = http.createServer(async (req, res) => {
         if (!body.marca || !body.modelo || !body.toner) {
           return sendJSON(res, 400, { error: 'Campos marca, modelo e toner são obrigatórios' });
         }
-        const maxId = toners.reduce((max, t) => (t.id > max ? t.id : max), 0);
-        const newItem = {
-          id: maxId + 1,
-          marca: String(body.marca).trim(),
-          modelo: String(body.modelo).trim(),
-          toner: String(body.toner).trim(),
-          quantidade: parseInt(body.quantidade) || 0,
-          estoqueMinimo: parseInt(body.estoqueMinimo) || 5,
-          realizarPedido: Boolean(body.realizarPedido),
-        };
-        toners.push(newItem);
-        saveJSON(TONERS_FILE, toners);
-        return sendJSON(res, 201, newItem);
+        const insertRes = await pool.query(
+          `INSERT INTO toners (marca, modelo, toner, quantidade, estoque_minimo, realizar_pedido)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING
+            id, marca, modelo, toner, quantidade,
+            estoque_minimo AS "estoqueMinimo",
+            realizar_pedido AS "realizarPedido"`,
+          [
+            String(body.marca).trim(),
+            String(body.modelo).trim(),
+            String(body.toner).trim(),
+            parseInt(body.quantidade) || 0,
+            parseInt(body.estoqueMinimo) || 5,
+            Boolean(body.realizarPedido)
+          ]
+        );
+        return sendJSON(res, 201, insertRes.rows[0]);
       } catch (err) {
+        console.error('Erro POST /api/toners:', err);
         return sendJSON(res, 400, { error: 'JSON inválido' });
       }
     }
 
     // PUT /api/toners/:id
-    if (method === 'PUT' && subPath.match(/^\/\d+$/)) {
-      const id = parseInt(subPath.substring(1), 10);
-      const index = toners.findIndex(t => t.id === id);
-      if (index === -1) return sendJSON(res, 404, { error: 'Toner não encontrado' });
+    const editTonerMatch = subPath.match(/^\/(\d+)$/);
+    if (method === 'PUT' && editTonerMatch) {
+      const id = parseInt(editTonerMatch[1], 10);
       try {
+        const tonerRes = await pool.query('SELECT * FROM toners WHERE id = $1', [id]);
+        if (tonerRes.rows.length === 0) return sendJSON(res, 404, { error: 'Toner não encontrado' });
+        const current = tonerRes.rows[0];
         const body = await getRequestBody(req);
-        toners[index] = {
-          ...toners[index],
-          marca: body.marca ? String(body.marca).trim() : toners[index].marca,
-          modelo: body.modelo ? String(body.modelo).trim() : toners[index].modelo,
-          toner: body.toner ? String(body.toner).trim() : toners[index].toner,
-          quantidade: typeof body.quantidade !== 'undefined' ? parseInt(body.quantidade) || 0 : toners[index].quantidade,
-          estoqueMinimo: typeof body.estoqueMinimo !== 'undefined' ? parseInt(body.estoqueMinimo) || 5 : toners[index].estoqueMinimo,
-          realizarPedido: typeof body.realizarPedido !== 'undefined' ? Boolean(body.realizarPedido) : toners[index].realizarPedido,
-        };
 
-        const targetToner = toners[index].toner;
-        const targetQty = toners[index].quantidade;
-        const targetRealizarPedido = toners[index].realizarPedido;
-        toners.forEach(t => {
-          if (t.toner === targetToner) {
-            t.quantidade = targetQty;
-            t.realizarPedido = targetRealizarPedido;
-          }
-        });
+        const novaMarca = body.marca ? String(body.marca).trim() : current.marca;
+        const novoModelo = body.modelo ? String(body.modelo).trim() : current.modelo;
+        const novoToner = body.toner ? String(body.toner).trim() : current.toner;
+        const novaQtd = typeof body.quantidade !== 'undefined' ? parseInt(body.quantidade) || 0 : current.quantidade;
+        const novoEstoqueMin = typeof body.estoqueMinimo !== 'undefined' ? parseInt(body.estoqueMinimo) || 5 : current.estoque_minimo;
+        const novoRealizarPed = typeof body.realizarPedido !== 'undefined' ? Boolean(body.realizarPedido) : current.realizar_pedido;
 
-        saveJSON(TONERS_FILE, toners);
-        return sendJSON(res, 200, toners[index]);
+        const updateRes = await pool.query(
+          `UPDATE toners
+           SET marca = $1, modelo = $2, toner = $3, quantidade = $4, estoque_minimo = $5, realizar_pedido = $6
+           WHERE id = $7
+           RETURNING
+            id, marca, modelo, toner, quantidade,
+            estoque_minimo AS "estoqueMinimo",
+            realizar_pedido AS "realizarPedido"`,
+          [novaMarca, novoModelo, novoToner, novaQtd, novoEstoqueMin, novoRealizarPed, id]
+        );
+
+        // Sincronizar modelos que compartilham o mesmo toner
+        await pool.query(
+          'UPDATE toners SET quantidade = $1, realizar_pedido = $2 WHERE toner = $3',
+          [novaQtd, novoRealizarPed, novoToner]
+        );
+
+        return sendJSON(res, 200, updateRes.rows[0]);
       } catch (err) {
+        console.error('Erro PUT /api/toners/:id:', err);
         return sendJSON(res, 400, { error: 'JSON inválido' });
       }
     }
 
     // DELETE /api/toners/:id
-    if (method === 'DELETE' && subPath.match(/^\/\d+$/)) {
-      const id = parseInt(subPath.substring(1), 10);
-      const index = toners.findIndex(t => t.id === id);
-      if (index === -1) return sendJSON(res, 404, { error: 'Toner não encontrado' });
-      toners.splice(index, 1);
-      saveJSON(TONERS_FILE, toners);
-      return sendJSON(res, 204, null);
+    const deleteTonerMatch = subPath.match(/^\/(\d+)$/);
+    if (method === 'DELETE' && deleteTonerMatch) {
+      const id = parseInt(deleteTonerMatch[1], 10);
+      try {
+        const delRes = await pool.query('DELETE FROM toners WHERE id = $1 RETURNING id', [id]);
+        if (delRes.rows.length === 0) return sendJSON(res, 404, { error: 'Toner não encontrado' });
+        return sendJSON(res, 204, null);
+      } catch (err) {
+        console.error('Erro DELETE /api/toners/:id:', err);
+        return sendJSON(res, 500, { error: 'Erro ao excluir toner' });
+      }
     }
   }
 

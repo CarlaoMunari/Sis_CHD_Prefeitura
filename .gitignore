@@ -1,3 +1,5 @@
 node_modules/
 .remember/
 *.log
+.vercel
+.env
