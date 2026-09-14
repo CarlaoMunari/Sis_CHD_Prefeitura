@@ -1,0 +1,16 @@
+name: Keep Supabase & Vercel Active
+
+on:
+  schedule:
+    # Executa a cada 3 dias às 09:00 UTC (06:00 BRT)
+    - cron: '0 9 */3 * *'
+  workflow_dispatch: # Permite disparo manual se necessário
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Sistema (ativa Supabase e Vercel)
+        run: |
+          curl -s -f -m 30 "https://tonerssystem.vercel.app/api/toners/stats" || true
+          echo "Ping de atividade enviado com sucesso!"

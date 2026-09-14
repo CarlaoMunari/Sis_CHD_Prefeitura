@@ -64,3 +64,20 @@ CREATE TABLE tickets (
   data_finalizacao         TIMESTAMPTZ DEFAULT NULL,
   historico                JSONB NOT NULL DEFAULT '[]'::jsonb
 );
+
+-- ============================================================
+-- EXTENSÕES & ROTINA INTERNA KEEP-ALIVE (Anti-inatividade Supabase)
+-- ============================================================
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+-- Agenda chamada automática 2 vezes ao dia (06:00 e 18:00 UTC)
+-- para consultar o sistema e manter o banco ativo contra pausas do Free Tier
+SELECT cron.schedule(
+  'keep_alive_ping',
+  '0 6,18 * * *',
+  $$
+  SELECT net.http_get(url := 'https://tonerssystem.vercel.app/api/toners/stats');
+  $$
+);
+
