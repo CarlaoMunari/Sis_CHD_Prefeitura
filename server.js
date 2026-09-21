@@ -83,6 +83,23 @@ function getRequestBody(req) {
   });
 }
 
+// Auxiliar para obter usuário requisitante a partir do header Authorization
+async function getRequesterUser(req) {
+  const authHeader = req.headers['authorization'] || '';
+  if (!authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.replace('Bearer ', '').trim();
+  const match = token.match(/^token_(\d+)_/);
+  if (!match) return null;
+  const userId = parseInt(match[1], 10);
+  try {
+    const userRes = await pool.query('SELECT id, login, nome, email, departamento, role, ativo, status FROM users WHERE id = $1', [userId]);
+    return userRes.rows.length > 0 ? userRes.rows[0] : null;
+  } catch (err) {
+    console.error('Erro ao verificar usuário do token:', err);
+    return null;
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
@@ -702,6 +719,84 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         console.error('Erro PUT /api/tickets/:id:', err);
         return sendJSON(res, 500, { error: err.message || 'Erro ao atualizar chamado.' });
+      }
+    }
+
+    // DELETE /api/tickets/:id (Excluir chamado por Admin & Desfazer processos/baixa de estoque)
+    const deleteTicketMatch = subPath.match(/^\/(\d+)$/);
+    if (method === 'DELETE' && deleteTicketMatch) {
+      const id = parseInt(deleteTicketMatch[1], 10);
+      try {
+        // Validar permissão: se houver token enviado, deve ser ADMIN ou SUPER_ADMIN
+        const requester = await getRequesterUser(req);
+        if (requester && requester.role !== 'ADMIN' && requester.role !== 'SUPER_ADMIN') {
+          return sendJSON(res, 403, { error: 'Apenas administradores podem excluir chamados.' });
+        }
+
+        const ticketRes = await pool.query('SELECT * FROM tickets WHERE id = $1', [id]);
+        if (ticketRes.rows.length === 0) {
+          return sendJSON(res, 404, { error: 'Chamado não encontrado.' });
+        }
+        const ticket = ticketRes.rows[0];
+
+        let detalhesToner = ticket.detalhes_toner;
+        if (typeof detalhesToner === 'string') {
+          try { detalhesToner = JSON.parse(detalhesToner); } catch (e) {}
+        }
+
+        let itensEstornados = 0;
+        let listaEstornada = [];
+
+        // Se a baixa no estoque foi realizada anteriormente, estornar/devolver cada item ao estoque
+        if (ticket.baixa_estoque_realizada && detalhesToner && Array.isArray(detalhesToner.itens)) {
+          for (const item of detalhesToner.itens) {
+            let tonerRow = null;
+            if (item.tonerId) {
+              const tRes = await pool.query('SELECT * FROM toners WHERE id = $1', [item.tonerId]);
+              if (tRes.rows.length > 0) tonerRow = tRes.rows[0];
+            }
+            if (!tonerRow && item.marca && item.modelo) {
+              const tRes = await pool.query('SELECT * FROM toners WHERE marca = $1 AND modelo = $2', [item.marca, item.modelo]);
+              if (tRes.rows.length > 0) tonerRow = tRes.rows[0];
+            }
+            if (!tonerRow && item.toner) {
+              const tRes = await pool.query('SELECT * FROM toners WHERE toner = $1', [item.toner]);
+              if (tRes.rows.length > 0) tonerRow = tRes.rows[0];
+            }
+
+            if (tonerRow) {
+              const isInk = tonerRow.toner.toLowerCase().includes('tank') || tonerRow.toner.toLowerCase().includes('tinta');
+              if (!isInk) {
+                const qtdDevolver = parseInt(item.quantidadeSolicitada, 10) || 1;
+                const novaQtd = tonerRow.quantidade + qtdDevolver;
+                const realizarPedido = novaQtd <= tonerRow.estoque_minimo;
+                await pool.query(
+                  'UPDATE toners SET quantidade = $1, realizar_pedido = $2 WHERE id = $3',
+                  [novaQtd, realizarPedido, tonerRow.id]
+                );
+                itensEstornados += qtdDevolver;
+                listaEstornada.push(`${qtdDevolver}x ${tonerRow.toner}`);
+              }
+            }
+          }
+        }
+
+        // Excluir chamado da tabela tickets
+        await pool.query('DELETE FROM tickets WHERE id = $1', [id]);
+
+        let msg = `Chamado ${ticket.codigo} excluído com sucesso!`;
+        if (itensEstornados > 0) {
+          msg += ` Estorno no estoque de toners realizado (+${itensEstornados} un: ${listaEstornada.join(', ')}).`;
+        }
+
+        return sendJSON(res, 200, {
+          message: msg,
+          codigo: ticket.codigo,
+          itensEstornados
+        });
+      } catch (err) {
+        console.error('Erro DELETE /api/tickets/:id:', err);
+        return sendJSON(res, 500, { error: err.message || 'Erro ao excluir chamado.' });
       }
     }
   }

@@ -98,6 +98,11 @@ function renderTicketsTable() {
         <button class="btn btn-info btn-small" onclick="viewTicketDetail(${t.id})">
           ${isAdmin ? '🛠️ Atender / Editar' : '👁️ Ver Detalhes'}
         </button>
+        ${isAdmin ? `
+          <button class="btn btn-danger btn-small" style="margin-left: 4px;" onclick="excluirChamado(${t.id}, '${t.codigo}')" title="Excluir Chamado">
+            🗑️ Excluir
+          </button>
+        ` : ''}
       </td>
     `;
     tbody.appendChild(row);
@@ -383,11 +388,12 @@ async function viewTicketDetail(ticketId) {
         </div>
       ` : ''}
 
-      <div style="display:flex; gap:10px; margin-top: 1rem;">
+      <div style="display:flex; gap:10px; margin-top: 1rem; flex-wrap: wrap; align-items: center;">
         <button class="btn btn-primary" onclick="saveAdminTicketChanges(${ticket.id})">💾 Salvar Alterações</button>
         ${ticket.status !== 'FINALIZADO' ? `
           <button class="btn btn-success" onclick="finalizarEDarBaixaEstoque(${ticket.id})">✅ Finalizar & Dar Baixa no Estoque</button>
         ` : '<span style="color:#22543d; font-weight:bold; align-self:center;">✓ Baixa no Estoque Concluída</span>'}
+        <button class="btn btn-danger" style="margin-left:auto;" onclick="excluirChamado(${ticket.id}, '${ticket.codigo}')">🗑️ Excluir Chamado</button>
       </div>
     `;
   } else {
@@ -568,3 +574,42 @@ async function reabrirChamado(ticketId) {
     }
   }
 }
+
+// Excluir Chamado por Administrador (desfaz processos atrelados e estorna baixa de estoque de toner)
+async function excluirChamado(ticketId, ticketCodigo) {
+  const currentUser = Auth.getUser();
+  if (!currentUser || (currentUser.role !== 'ADMIN' && currentUser.role !== 'SUPER_ADMIN')) {
+    alert('Apenas administradores podem excluir chamados.');
+    return;
+  }
+
+  const confirmMsg = `Tem certeza que deseja EXCLUIR o chamado ${ticketCodigo}?\n\n` +
+    `⚠️ ATENÇÃO: Esta ação é irreversível.\n` +
+    `Se este chamado tiver tido baixa automática no estoque de toner, ela será DESFEITA e os itens serão devolvidos ao estoque.`;
+
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const res = await fetch(`/api/tickets/${ticketId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${Auth.getToken()}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao excluir chamado.');
+
+    alert(data.message || `Chamado ${ticketCodigo} excluído com sucesso!`);
+
+    const modal = document.getElementById('ticketDetailModal');
+    if (modal) modal.style.display = 'none';
+
+    await loadTonersInventory();
+    await loadTickets();
+  } catch (err) {
+    alert('Erro ao excluir chamado: ' + err.message);
+  }
+}
+
