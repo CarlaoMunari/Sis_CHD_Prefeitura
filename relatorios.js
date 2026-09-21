@@ -11,21 +11,20 @@ let chartCat    = null;
 let chartDepto  = null;
 let chartLine   = null;
 
-// ── Constantes visuais ───────────────────────────────────────────────────────
 const COLORS_PALETTE = [
   '#667eea','#f6ad55','#68d391','#fc8181','#76e4f7',
   '#b794f4','#f687b3','#4fd1c5','#f6e05e','#a0aec0'
 ];
 
 const STATUS_LABELS = {
-  ABERTO:            'Aberto',
-  EM_ATENDIMENTO:    'Em Atendimento',
-  AGUARDANDO_PECAS:  'Aguardando Pecas',
-  FINALIZADO:        'Finalizado',
-  CANCELADO:         'Cancelado'
+  ABERTO:           'Aberto',
+  EM_ATENDIMENTO:   'Em Atendimento',
+  AGUARDANDO_PECAS: 'Aguardando Pecas',
+  FINALIZADO:       'Finalizado',
+  CANCELADO:        'Cancelado'
 };
 
-// ── Inicializacao ────────────────────────────────────────────────────────────
+// Inicializacao
 document.addEventListener('DOMContentLoaded', async () => {
   await carregarChamados();
 });
@@ -44,7 +43,7 @@ async function carregarChamados() {
   }
 }
 
-// ── Utilitarios ──────────────────────────────────────────────────────────────
+// Utilitarios
 function mostrarLoading(show) {
   const el = document.getElementById('loadingOverlay');
   if (show) el.classList.add('active');
@@ -86,25 +85,24 @@ function calcularTempo(t1, t2) {
   return `${h}h ${m}min`;
 }
 
-// ── Contadores dos cards ──────────────────────────────────────────────────────
+// Contadores dos cards
 function atualizarContadores() {
   const abertos     = allTickets.filter(t => ['ABERTO','EM_ATENDIMENTO','AGUARDANDO_PECAS'].includes(t.status));
   const finalizados = allTickets.filter(t => ['FINALIZADO','CANCELADO'].includes(t.status));
   const cats  = new Set(allTickets.map(t => t.categoria)).size;
-  const deptos= new Set(allTickets.map(t => t.solicitanteDepartamento)).size;
+  const deptos = new Set(allTickets.map(t => t.solicitanteDepartamento)).size;
 
-  document.getElementById('countAbertos').textContent     = `⏳ ${abertos.length} chamados`;
-  document.getElementById('countFinalizados').textContent = `✅ ${finalizados.length} chamados`;
-  document.getElementById('countCategorias').textContent  = `🏷️ ${cats} categorias`;
-  document.getElementById('countDeptos').textContent      = `🏢 ${deptos} departamentos`;
+  document.getElementById('countAbertos').textContent     = `${abertos.length} chamados`;
+  document.getElementById('countFinalizados').textContent = `${finalizados.length} chamados`;
+  document.getElementById('countCategorias').textContent  = `${cats} categorias`;
+  document.getElementById('countDeptos').textContent      = `${deptos} departamentos`;
 }
 
-// ── Graficos de Previa ────────────────────────────────────────────────────────
+// Graficos de Previa
 function renderizarGraficos() {
   if (allTickets.length === 0) return;
   document.getElementById('previewSection').classList.add('visible');
 
-  // Status
   const statusCount = {};
   allTickets.forEach(t => {
     statusCount[t.status] = (statusCount[t.status] || 0) + 1;
@@ -120,7 +118,6 @@ function renderizarGraficos() {
     options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, responsive: true }
   });
 
-  // Categoria
   const catCount = {};
   allTickets.forEach(t => {
     catCount[t.categoria] = (catCount[t.categoria] || 0) + 1;
@@ -141,7 +138,6 @@ function renderizarGraficos() {
     }
   });
 
-  // Departamento
   const deptoCount = {};
   allTickets.forEach(t => {
     const d = t.solicitanteDepartamento || 'GERAL';
@@ -158,7 +154,6 @@ function renderizarGraficos() {
     options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } }, responsive: true }
   });
 
-  // Timeline Abertos vs Finalizados (ultimos 30 dias)
   const hoje = new Date();
   const dias = Array.from({ length: 30 }, (_, i) => {
     const d = new Date(hoje);
@@ -190,7 +185,7 @@ function renderizarGraficos() {
   });
 }
 
-// ── Cabecalho padrao PDF ──────────────────────────────────────────────────────
+// Cabecalho padrao PDF (sem emojis)
 function addHeaderPDF(doc, titulo, subtitulo) {
   const W = doc.internal.pageSize.width;
   doc.setFillColor(0, 43, 127);
@@ -210,7 +205,7 @@ function addHeaderPDF(doc, titulo, subtitulo) {
   doc.setFontSize(9);
   doc.text(`Gerado em: ${hoje} as ${hora}`, 15, 48);
   doc.text(`Responsavel: ${Auth.getUser().nome || Auth.getUser().login}`, 15, 54);
-  return 62; // Y de inicio do conteudo
+  return 62;
 }
 
 function addFooterPDF(doc, pageNum, totalPages) {
@@ -232,9 +227,7 @@ function finalizarPDF(doc, nome) {
   doc.save(nome);
 }
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  RELATORIO 1 - CHAMADOS ABERTOS                                         ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// RELATORIO 1 - CHAMADOS ABERTOS
 async function gerarRelatorioAbertos() {
   mostrarLoading(true);
   try {
@@ -255,7 +248,6 @@ async function gerarRelatorioAbertos() {
       `Total: ${filtrados.length} chamado(s)`
     );
 
-    // Totais por status
     const por = { ABERTO: 0, EM_ATENDIMENTO: 0, AGUARDANDO_PECAS: 0 };
     filtrados.forEach(t => { if (por[t.status] !== undefined) por[t.status]++; });
     doc.setFontSize(10);
@@ -298,9 +290,7 @@ async function gerarRelatorioAbertos() {
   }
 }
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  RELATORIO 2 - CHAMADOS FINALIZADOS                                     ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// RELATORIO 2 - CHAMADOS FINALIZADOS
 async function gerarRelatorioFinalizados() {
   mostrarLoading(true);
   try {
@@ -365,9 +355,7 @@ async function gerarRelatorioFinalizados() {
   }
 }
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  RELATORIO 3 - CHAMADOS POR CATEGORIA                                   ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// RELATORIO 3 - CHAMADOS POR CATEGORIA
 async function gerarRelatorioCategoria() {
   mostrarLoading(true);
   try {
@@ -377,7 +365,6 @@ async function gerarRelatorioCategoria() {
       return;
     }
 
-    // Agrupar
     const grupos = {};
     filtrados.forEach(t => {
       if (!grupos[t.categoria]) grupos[t.categoria] = [];
@@ -386,10 +373,11 @@ async function gerarRelatorioCategoria() {
 
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait' });
-    const W = doc.internal.pageSize.width;
-    let startY = addHeaderPDF(doc, 'Relatorio de Chamados por Categoria', `Total: ${filtrados.length} chamado(s) em ${Object.keys(grupos).length} categoria(s)`);
+    let startY = addHeaderPDF(doc,
+      'Relatorio de Chamados por Categoria',
+      `Total: ${filtrados.length} chamado(s) em ${Object.keys(grupos).length} categoria(s)`
+    );
 
-    // Tabela-resumo de categorias
     doc.autoTable({
       startY,
       head: [['Categoria', 'Total', 'Abertos', 'Finalizados', 'Cancelados', '%']],
@@ -417,9 +405,7 @@ async function gerarRelatorioCategoria() {
 
     startY = doc.lastAutoTable.finalY + 12;
 
-    // Detalhe de cada categoria
     for (const [cat, itens] of Object.entries(grupos)) {
-      // Verificar espaco na pagina
       if (startY > 240) { doc.addPage(); startY = 20; }
 
       doc.setFontSize(11);
@@ -463,9 +449,7 @@ async function gerarRelatorioCategoria() {
   }
 }
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  RELATORIO 4 - CHAMADOS POR DEPARTAMENTO                                ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// RELATORIO 4 - CHAMADOS POR DEPARTAMENTO
 async function gerarRelatorioDepto() {
   mostrarLoading(true);
   try {
@@ -475,7 +459,6 @@ async function gerarRelatorioDepto() {
       return;
     }
 
-    // Agrupar por departamento
     const grupos = {};
     filtrados.forEach(t => {
       const d = t.solicitanteDepartamento || 'GERAL';
@@ -485,9 +468,11 @@ async function gerarRelatorioDepto() {
 
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait' });
-    let startY = addHeaderPDF(doc, 'Relatorio de Chamados por Departamento', `Total: ${filtrados.length} chamado(s) em ${Object.keys(grupos).length} departamento(s)`);
+    let startY = addHeaderPDF(doc,
+      'Relatorio de Chamados por Departamento',
+      `Total: ${filtrados.length} chamado(s) em ${Object.keys(grupos).length} departamento(s)`
+    );
 
-    // Tabela-resumo por departamento
     doc.autoTable({
       startY,
       head: [['Departamento', 'Total', 'Abertos', 'Em Atend.', 'Ag. Pecas', 'Finalizados', 'Cancelados', '%']],
@@ -519,7 +504,6 @@ async function gerarRelatorioDepto() {
 
     startY = doc.lastAutoTable.finalY + 12;
 
-    // Detalhe de cada departamento
     for (const [depto, itens] of Object.entries(grupos)) {
       if (startY > 240) { doc.addPage(); startY = 20; }
 

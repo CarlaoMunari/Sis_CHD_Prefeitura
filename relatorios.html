@@ -23,7 +23,6 @@
     .reports-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1.5rem;margin-bottom:2rem}
     .report-card{background:white;border-radius:12px;border:1px solid #e2e8f0;padding:1.75rem;box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;flex-direction:column;gap:.75rem;transition:box-shadow .2s,transform .2s}
     .report-card:hover{box-shadow:0 6px 20px rgba(0,0,0,.12);transform:translateY(-2px)}
-    .report-card-icon{font-size:2.5rem;line-height:1}
     .report-card-title{font-size:1.1rem;font-weight:700;color:#2d3748}
     .report-card-desc{font-size:.88rem;color:#718096;flex:1}
     .report-card-footer{display:flex;justify-content:space-between;align-items:center;margin-top:.5rem;gap:.5rem}
@@ -37,7 +36,7 @@
     .stat-depto{background:#bee3f8;color:#2b6cb0}
     .preview-section{background:white;border-radius:12px;border:1px solid #e2e8f0;padding:1.5rem;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:2rem;display:none}
     .preview-section.visible{display:block}
-    .preview-title{font-size:1rem;font-weight:700;color:#2d3748;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+    .preview-title{font-size:1rem;font-weight:700;color:#2d3748;margin-bottom:1rem}
     .preview-charts{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
     @media(max-width:640px){.preview-charts{grid-template-columns:1fr}}
     .chart-preview-box{background:#f7fafc;border-radius:8px;padding:1rem}
@@ -52,6 +51,12 @@
     .feedback-bar.error{background:#fed7d7;color:#9b2c2c;display:block}
     .btn-purple{background:linear-gradient(135deg,#805ad5,#6b46c1);color:white}
     .btn-purple:hover{background:linear-gradient(135deg,#6b46c1,#805ad5);transform:translateY(-2px);box-shadow:0 5px 15px rgba(128,90,213,.4)}
+    .card-icon-bar{display:flex;align-items:center;gap:.6rem;margin-bottom:.25rem}
+    .card-icon-bar span{display:inline-block;width:12px;height:12px;border-radius:50%}
+    .dot-aberto{background:#c05621}
+    .dot-finalizado{background:#22543d}
+    .dot-categoria{background:#6b46c1}
+    .dot-depto{background:#2b6cb0}
   </style>
 </head>
 <body>
@@ -73,68 +78,64 @@
 
     <div id="feedbackBar" class="feedback-bar"></div>
 
-    <p class="reports-page-title">&#128202; Relatorios de Chamados</p>
+    <p class="reports-page-title">Relatorios de Chamados</p>
     <p class="reports-page-subtitle">Gere relatorios em PDF com os dados atualizados do sistema de chamados.</p>
 
     <div class="reports-grid">
 
       <!-- Chamados Abertos -->
       <div class="report-card">
-        <div class="report-card-icon">&#128194;</div>
-        <div class="report-card-title">Chamados Abertos</div>
+        <div class="card-icon-bar"><span class="dot-aberto"></span><strong style="color:#c05621">Chamados Abertos</strong></div>
         <div class="report-card-desc">Lista todos os chamados com status <strong>Aberto</strong>, <strong>Em Atendimento</strong> ou <strong>Aguardando Pecas</strong>, ordenados pela data de abertura.</div>
         <div class="date-filter-row">
           <label>De: <input type="date" id="dataInicioAbertos"></label>
           <label>Ate: <input type="date" id="dataFimAbertos"></label>
         </div>
         <div class="report-card-footer">
-          <span class="stat-badge stat-aberto" id="countAbertos">&#9203; — chamados</span>
-          <button class="btn btn-pdf" onclick="gerarRelatorioAbertos()">&#128196; Gerar PDF</button>
+          <span class="stat-badge stat-aberto" id="countAbertos">-- chamados</span>
+          <button class="btn btn-pdf" onclick="gerarRelatorioAbertos()">Gerar PDF</button>
         </div>
       </div>
 
       <!-- Chamados Finalizados -->
       <div class="report-card">
-        <div class="report-card-icon">&#9989;</div>
-        <div class="report-card-title">Chamados Finalizados</div>
+        <div class="card-icon-bar"><span class="dot-finalizado"></span><strong style="color:#22543d">Chamados Finalizados</strong></div>
         <div class="report-card-desc">Lista todos os chamados com status <strong>Finalizado</strong> ou <strong>Cancelado</strong>, com data de conclusao e tempo de atendimento.</div>
         <div class="date-filter-row">
           <label>De: <input type="date" id="dataInicioFinalizados"></label>
           <label>Ate: <input type="date" id="dataFimFinalizados"></label>
         </div>
         <div class="report-card-footer">
-          <span class="stat-badge stat-finalizado" id="countFinalizados">&#9989; — chamados</span>
-          <button class="btn btn-success" onclick="gerarRelatorioFinalizados()">&#128196; Gerar PDF</button>
+          <span class="stat-badge stat-finalizado" id="countFinalizados">-- chamados</span>
+          <button class="btn btn-success" onclick="gerarRelatorioFinalizados()">Gerar PDF</button>
         </div>
       </div>
 
       <!-- Chamados por Categoria -->
       <div class="report-card">
-        <div class="report-card-icon">&#127991;</div>
-        <div class="report-card-title">Chamados por Categoria</div>
+        <div class="card-icon-bar"><span class="dot-categoria"></span><strong style="color:#6b46c1">Chamados por Categoria</strong></div>
         <div class="report-card-desc">Agrupa todos os chamados por categoria, com totalizadores e percentuais de distribuicao.</div>
         <div class="date-filter-row">
           <label>De: <input type="date" id="dataInicioCategoria"></label>
           <label>Ate: <input type="date" id="dataFimCategoria"></label>
         </div>
         <div class="report-card-footer">
-          <span class="stat-badge stat-categoria" id="countCategorias">&#127991; — categorias</span>
-          <button class="btn btn-purple" onclick="gerarRelatorioCategoria()">&#128196; Gerar PDF</button>
+          <span class="stat-badge stat-categoria" id="countCategorias">-- categorias</span>
+          <button class="btn btn-purple" onclick="gerarRelatorioCategoria()">Gerar PDF</button>
         </div>
       </div>
 
       <!-- Chamados por Departamento -->
       <div class="report-card">
-        <div class="report-card-icon">&#127970;</div>
-        <div class="report-card-title">Chamados por Departamento</div>
+        <div class="card-icon-bar"><span class="dot-depto"></span><strong style="color:#2b6cb0">Chamados por Departamento</strong></div>
         <div class="report-card-desc">Agrupa os chamados pelo departamento do solicitante, com totalizadores e detalhamento por status em cada setor.</div>
         <div class="date-filter-row">
           <label>De: <input type="date" id="dataInicioDepto"></label>
           <label>Ate: <input type="date" id="dataFimDepto"></label>
         </div>
         <div class="report-card-footer">
-          <span class="stat-badge stat-depto" id="countDeptos">&#127970; — departamentos</span>
-          <button class="btn btn-info" onclick="gerarRelatorioDepto()">&#128196; Gerar PDF</button>
+          <span class="stat-badge stat-depto" id="countDeptos">-- departamentos</span>
+          <button class="btn btn-info" onclick="gerarRelatorioDepto()">Gerar PDF</button>
         </div>
       </div>
 
@@ -142,7 +143,7 @@
 
     <!-- Previa de Graficos -->
     <div class="preview-section" id="previewSection">
-      <div class="preview-title">&#128200; Previa dos Dados (Todos os Chamados)</div>
+      <div class="preview-title">Previa dos Dados (Todos os Chamados)</div>
       <div class="preview-charts">
         <div class="chart-preview-box">
           <h4>Distribuicao por Status</h4>
